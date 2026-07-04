@@ -1,0 +1,3 @@
+$json = '[{"phone":"9013290280","sellableCoins":1000,"systemCoins":8000,"purchasedCoins":0,"points":45000,"cupMedals":"تاج","tournamentMedals":"ندارد","honorMedals":"ندارد","inviteCount":1,"predictionCount":93,"perfectPredictionCount":11},{"phone":"9104668058","sellableCoins":1000,"systemCoins":8000,"purchasedCoins":0,"points":45000,"cupMedals":"ندارد","tournamentMedals":"ندارد","honorMedals":"ندارد","inviteCount":0,"predictionCount":63,"perfectPredictionCount":6}]'
+$remote = "sh -lc ""printf '%s' '$json' > /tmp/custom-legacy-users.json && node prisma/legacy-user-import.mjs /tmp/custom-legacy-users.json"""
+liara shell --app bordin --command $remote

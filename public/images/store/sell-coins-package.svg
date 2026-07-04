@@ -1,0 +1,29 @@
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="bg2" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(128 128) rotate(90) scale(128)">
+      <stop stop-color="#191919"/>
+      <stop offset="1" stop-color="#000000"/>
+    </radialGradient>
+  </defs>
+  <rect width="256" height="256" rx="36" fill="url(#bg2)"/>
+  <circle cx="70" cy="70" r="30" fill="#8C52FF" fill-opacity="0.22"/>
+  <circle cx="70" cy="70" r="18" stroke="#5ECFFF" stroke-width="4" stroke-opacity="0.8"/>
+  <rect x="152" y="122" width="64" height="44" rx="10" fill="#1D1D1D" stroke="#5ECFFF" stroke-width="3"/>
+  <rect x="160" y="110" width="48" height="18" rx="6" fill="#2A2A2A" stroke="#56FF62" stroke-width="3"/>
+  <path d="M78 130C112 130 122 130 152 130" stroke="#56FF62" stroke-width="5" stroke-linecap="round"/>
+  <path d="M80 146C116 146 122 146 150 146" stroke="#8C52FF" stroke-width="4" stroke-linecap="round"/>
+  <path d="M145 126L154 130L145 134" stroke="#56FF62" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M143 142L152 146L143 150" stroke="#8C52FF" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <g>
+    <circle cx="64" cy="128" r="14" fill="#FFA100"/>
+    <text x="64" y="133" text-anchor="middle" fill="#000" font-size="12" font-weight="700" font-family="Arial">B</text>
+  </g>
+  <g>
+    <circle cx="82" cy="146" r="14" fill="#FFA100"/>
+    <text x="82" y="151" text-anchor="middle" fill="#000" font-size="12" font-weight="700" font-family="Arial">B</text>
+  </g>
+  <g>
+    <circle cx="96" cy="120" r="14" fill="#FFA100"/>
+    <text x="96" y="125" text-anchor="middle" fill="#000" font-size="12" font-weight="700" font-family="Arial">B</text>
+  </g>
+</svg>

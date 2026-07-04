@@ -1,0 +1,20 @@
+# Liara upload excludes (main app deploy only; worker deploys via cf:worker:deploy)
+
+# Cloudflare worker — separate deploy path
+workers/
+
+# Docs and local tooling — not needed on server
+doc/
+docs/
+scripts/data/
+.github/
+.cursor/
+
+# Local env overrides — must not override production values during Liara build
+.env.local
+.env.staging.local
+.env.production.local
+
+# Debug artifacts
+debug-*.log
+agent-transcripts/

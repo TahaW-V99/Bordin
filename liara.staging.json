@@ -1,0 +1,9 @@
+{
+  "app": "bordintest",
+  "platform": "node",
+  "port": 3000,
+  "node": {
+    "version": "20",
+    "mirror": true
+  }
+}

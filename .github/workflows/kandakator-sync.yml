@@ -1,0 +1,46 @@
+# به‌روزرسانی خودکار کنداکتور: دریافت بازی‌ها از football-data.org و ارسال به برنامه
+# (سرورهای خارج از ایران — بدون نیاز به روشن بودن کامپیوتر شما)
+#
+# تنظیم یک‌باره در GitHub → Settings → Secrets → Actions:
+#   FOOTBALL_DATA_API_KEY
+#   KANDAKATOR_SYNC_PUSH_TOKEN
+#   BORDIN_PUSH_URLS (اختیاری، پیش‌فرض: https://bordintest.ir,https://bordin.ir)
+
+name: Kandakator auto-sync
+
+on:
+  schedule:
+    # هر ۲۰ دقیقه — بازی‌های جدید + نتایج + تسویه پیش‌بینی‌ها
+    - cron: "*/20 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: kandakator-sync
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Push kandakator week to app
+        env:
+          FOOTBALL_DATA_API_KEY: ${{ secrets.FOOTBALL_DATA_API_KEY }}
+          KANDAKATOR_SYNC_PUSH_TOKEN: ${{ secrets.KANDAKATOR_SYNC_PUSH_TOKEN }}
+          # هر دو محیط — اگر secret خالی باشد اسکریپت پیش‌فرض bordintest + bordin را می‌زند
+          BORDIN_PUSH_URLS: ${{ secrets.BORDIN_PUSH_URLS || 'https://bordintest.ir,https://bordin.ir' }}
+          BORDIN_STAGING_URL: ${{ secrets.BORDIN_STAGING_URL }}
+          FOOTBALL_DATA_FETCH_TIMEOUT_MS: "30000"
+        run: npx tsx scripts/push-kandakator-remote.ts

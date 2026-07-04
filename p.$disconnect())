@@ -1,0 +1,13 @@
+[eval]:1
+"const
+^^^^^^
+
+SyntaxError: Invalid or unexpected token
+[90m    at makeContextifyScript (node:internal/vm:185:14)[39m
+[90m    at node:internal/process/execution:107:22[39m
+    at [eval]-wrapper:6:24
+[90m    at runScript (node:internal/process/execution:101:62)[39m
+[90m    at evalScript (node:internal/process/execution:133:3)[39m
+[90m    at node:internal/main/eval_string:51:3[39m
+
+Node.js v20.19.4

@@ -1,0 +1,23 @@
+# Optional local MySQL only — NOT used for Liara production or staging.
+# Production → .env + app "bordin". Staging → .env.staging + app "bordin-test" (see docs/STAGING.md).
+# 1. Set prisma/schema.prisma provider to "mysql"
+# 2. DATABASE_URL="mysql://bordin:bordin@localhost:3306/bordin"
+# 3. docker compose up -d
+# 4. npm run db:setup
+
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: password
+      MYSQL_DATABASE: bordin
+      MYSQL_USER: bordin
+      MYSQL_PASSWORD: bordin
+    volumes:
+      - bordin_mysql_data:/var/lib/mysql
+
+volumes:
+  bordin_mysql_data:

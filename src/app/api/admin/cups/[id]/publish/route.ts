@@ -1,0 +1,24 @@
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { getSession } from "@/shared/lib/auth";
+import { getApiErrorMessage } from "@/shared/lib/api-errors";
+import { requireAdmin, toggleCupPublish } from "@/server/services/admin-service";
+
+const schema = z.object({ isPublished: z.boolean() });
+
+export async function PATCH(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const session = await getSession();
+    if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    await requireAdmin(session.userId);
+    const { id } = await params;
+    const { isPublished } = schema.parse(await request.json());
+    const cup = await toggleCupPublish(id, isPublished);
+    return NextResponse.json({ success: true, cup });
+  } catch (error) {
+    return NextResponse.json({ error: getApiErrorMessage(error) }, { status: 400 });
+  }
+}
