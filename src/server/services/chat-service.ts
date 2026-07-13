@@ -9,7 +9,6 @@ import {
   CHAT_TEAMS_ACCESS_DENIED_FA,
   type ChatRoomSlugKey,
   chatRoomSlugFromDb,
-  chatRoomSlugToDb,
   parseChatRoomParam,
 } from "@/shared/constants/chat";
 import type {
@@ -26,7 +25,7 @@ import { getKandakatorForDate } from "@/server/services/kandakator-service";
 import { resolveCredibilityTier } from "@/shared/lib/chat-logic";
 import { loadReactionsForMessagesForUser } from "@/server/services/chat-social-service";
 import { listMemorySystemMessages } from "@/server/services/chat-system-events";
-import { getEligibleGlobalRankForUser } from "@/server/services/leaderboard-service";
+import { getEligibleGlobalRanksForUsers } from "@/server/services/leaderboard-service";
 import { getUnreadCountsByRoomKey } from "@/server/services/chat-unread-service";
 import { formatChatMentionPlainText } from "@/shared/lib/chat-mentions";
 import { userNeedsDisplayName } from "@/shared/lib/kandakator-utils";
@@ -206,39 +205,6 @@ async function assertCanSendChatMessage(userId: string) {
   }
 }
 
-async function serializeSender(userId: string): Promise<ChatSenderDto> {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: {
-      id: true,
-      _count: { select: { userMedals: true } },
-      profile: {
-        select: {
-          displayName: true,
-          avatarUrl: true,
-          showcaseSlug: true,
-          currentLevel: { select: { nameFa: true, rank: true } },
-        },
-      },
-    },
-  });
-
-  const profile = user?.profile;
-  const levelRank = profile?.currentLevel?.rank ?? null;
-  const medalCount = user?._count.userMedals ?? 0;
-  const globalRank = await getEligibleGlobalRankForUser(userId);
-
-  return {
-    userId,
-    displayName: profile?.displayName?.trim() || "کاربر بُردین",
-    avatarUrl: profile?.avatarUrl ?? null,
-    showcaseSlug: profile?.showcaseSlug ?? null,
-    levelNameFa: profile?.currentLevel?.nameFa ?? null,
-    globalRank,
-    credibilityTier: resolveCredibilityTier({ globalRank, levelRank, medalCount }),
-  };
-}
-
 function serializeMemorySender(userId: string): ChatSenderDto {
   return {
     userId,
@@ -264,13 +230,84 @@ type ReplySourceRow = {
   userId: string | null;
 };
 
-async function buildReplyPreview(row: ReplySourceRow): Promise<ChatReplyPreviewDto> {
-  const sender =
-    row.userId && !(await shouldUseMemoryDb())
-      ? await serializeSender(row.userId)
-      : row.userId
-        ? serializeMemorySender(row.userId)
-        : null;
+type SenderSnapshot = {
+  displayName: string;
+  avatarUrl: string | null;
+  showcaseSlug: string | null;
+  levelNameFa: string | null;
+  levelRank: number | null;
+  medalCount: number;
+};
+
+function buildSenderDto(userId: string, snapshot: SenderSnapshot | null, globalRank: number | null): ChatSenderDto {
+  const levelRank = snapshot?.levelRank ?? null;
+  const medalCount = snapshot?.medalCount ?? 0;
+  return {
+    userId,
+    displayName: snapshot?.displayName?.trim() || "کاربر بُردین",
+    avatarUrl: snapshot?.avatarUrl ?? null,
+    showcaseSlug: snapshot?.showcaseSlug ?? null,
+    levelNameFa: snapshot?.levelNameFa ?? null,
+    globalRank,
+    credibilityTier: resolveCredibilityTier({ globalRank, levelRank, medalCount }),
+  };
+}
+
+async function loadSenderMap(userIds: string[]) {
+  const map = new Map<string, ChatSenderDto>();
+  const uniqueUserIds = [...new Set(userIds.filter(Boolean))];
+  if (!uniqueUserIds.length) return map;
+
+  if (await shouldUseMemoryDb()) {
+    for (const userId of uniqueUserIds) {
+      map.set(userId, serializeMemorySender(userId));
+    }
+    return map;
+  }
+
+  const [users, rankMap] = await Promise.all([
+    prisma.user.findMany({
+      where: { id: { in: uniqueUserIds } },
+      select: {
+        id: true,
+        _count: { select: { userMedals: true } },
+        profile: {
+          select: {
+            displayName: true,
+            avatarUrl: true,
+            showcaseSlug: true,
+            currentLevel: { select: { nameFa: true, rank: true } },
+          },
+        },
+      },
+    }),
+    getEligibleGlobalRanksForUsers(uniqueUserIds),
+  ]);
+
+  const snapshotMap = new Map<string, SenderSnapshot>();
+  for (const user of users) {
+    snapshotMap.set(user.id, {
+      displayName: user.profile?.displayName?.trim() || "کاربر بُردین",
+      avatarUrl: user.profile?.avatarUrl ?? null,
+      showcaseSlug: user.profile?.showcaseSlug ?? null,
+      levelNameFa: user.profile?.currentLevel?.nameFa ?? null,
+      levelRank: user.profile?.currentLevel?.rank ?? null,
+      medalCount: user._count.userMedals ?? 0,
+    });
+  }
+
+  for (const userId of uniqueUserIds) {
+    map.set(userId, buildSenderDto(userId, snapshotMap.get(userId) ?? null, rankMap.get(userId) ?? null));
+  }
+
+  return map;
+}
+
+function buildReplyPreview(
+  row: ReplySourceRow,
+  senderMap: Map<string, ChatSenderDto>,
+): ChatReplyPreviewDto {
+  const sender = row.userId ? (senderMap.get(row.userId) ?? null) : null;
 
   return {
     id: row.id,
@@ -294,9 +331,10 @@ async function loadReplyPreviews(ids: string[]) {
       userId: null as string | null,
     }));
     const all: ReplySourceRow[] = [...memoryMessages, ...systemRows];
+    const senderMap = await loadSenderMap(all.map((row) => row.userId ?? "").filter(Boolean));
     for (const id of ids) {
       const row = all.find((r) => r.id === id);
-      if (row) map.set(id, await buildReplyPreview(row));
+      if (row) map.set(id, buildReplyPreview(row, senderMap));
     }
     return map;
   }
@@ -312,8 +350,9 @@ async function loadReplyPreviews(ids: string[]) {
     },
   });
 
+  const senderMap = await loadSenderMap(rows.map((row) => row.userId ?? "").filter(Boolean));
   for (const row of rows) {
-    map.set(row.id, await buildReplyPreview(row));
+    map.set(row.id, buildReplyPreview(row, senderMap));
   }
 
   return map;
@@ -340,14 +379,16 @@ async function rowToDto(
   extras?: {
     reactions?: Array<{ emoji: string; count: number; reactedByMe: boolean }>;
     replyTo?: ChatReplyPreviewDto | null;
+    sender?: ChatSenderDto | null;
   },
 ): Promise<ChatMessageDto> {
   const sender =
-    row.userId && !(await shouldUseMemoryDb())
-      ? await serializeSender(row.userId)
-      : row.userId
+    extras?.sender ??
+    (row.userId
+      ? (await shouldUseMemoryDb())
         ? serializeMemorySender(row.userId)
-        : null;
+        : ((await loadSenderMap([row.userId])).get(row.userId) ?? null)
+      : null);
 
   return {
     id: row.id,
@@ -434,9 +475,7 @@ const TEAM_COMPETITION_STAGE_LABEL_FA: Record<TeamCompetitionStage, string> = {
   FINISHED: "پایان‌یافته",
 };
 
-async function getActiveCompetitionsForChat(
-  _userId: string,
-): Promise<ChatActiveCompetitionCard[]> {
+async function getActiveCompetitionsForChat(): Promise<ChatActiveCompetitionCard[]> {
   if (await shouldUseMemoryDb()) return [];
 
   const now = new Date();
@@ -539,7 +578,7 @@ async function getRoomContext(userId: string, slugParam: string): Promise<ChatRo
   }
 
   if (slugParam === "competitions") {
-    context.activeCompetitions = await getActiveCompetitionsForChat(userId);
+    context.activeCompetitions = await getActiveCompetitionsForChat();
   }
 
   return context;
@@ -598,11 +637,15 @@ export async function getChatRoomDetail(
         loadReplyPreviews(replyToIds),
       ])
     : [new Map(), new Map()];
+  const senderMap = access.canAccess
+    ? await loadSenderMap(rows.map((row) => row.userId ?? "").filter(Boolean))
+    : new Map<string, ChatSenderDto>();
 
   const messages = await Promise.all(
     [...rows].reverse().map((row) =>
       rowToDto(row, userId, {
         reactions: reactionsMap.get(row.id) ?? [],
+        sender: row.userId ? (senderMap.get(row.userId) ?? null) : null,
         replyTo:
           "replyToId" in row && row.replyToId
             ? (replyPreviewMap.get(row.replyToId) ?? null)

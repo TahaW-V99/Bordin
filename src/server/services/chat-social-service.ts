@@ -74,10 +74,12 @@ export async function setChatReaction(userId: string, messageId: string, emoji: 
     if (idx >= 0) {
       if (memoryReactions[idx].emoji === emoji) {
         memoryReactions.splice(idx, 1);
-        return { removed: true };
+        const reactions = (await loadReactionsForMessagesForUser([messageId], userId)).get(messageId) ?? [];
+        return { removed: true, reactions };
       }
       memoryReactions[idx].emoji = emoji;
-      return { updated: true };
+      const reactions = (await loadReactionsForMessagesForUser([messageId], userId)).get(messageId) ?? [];
+      return { updated: true, reactions };
     }
     memoryReactions.push({
       id: `react-${memoryReactions.length + 1}`,
@@ -85,7 +87,8 @@ export async function setChatReaction(userId: string, messageId: string, emoji: 
       userId,
       emoji,
     });
-    return { added: true };
+    const reactions = (await loadReactionsForMessagesForUser([messageId], userId)).get(messageId) ?? [];
+    return { added: true, reactions };
   }
 
   const message = await prisma.chatMessage.findUnique({ where: { id: messageId } });
@@ -97,7 +100,8 @@ export async function setChatReaction(userId: string, messageId: string, emoji: 
 
   if (existing?.emoji === emoji) {
     await prisma.chatReaction.delete({ where: { id: existing.id } });
-    return { removed: true };
+    const reactions = (await loadReactionsForMessagesForUser([messageId], userId)).get(messageId) ?? [];
+    return { removed: true, reactions };
   }
 
   await prisma.chatReaction.upsert({
@@ -106,7 +110,8 @@ export async function setChatReaction(userId: string, messageId: string, emoji: 
     update: { emoji },
   });
 
-  return existing ? { updated: true } : { added: true };
+  const reactions = (await loadReactionsForMessagesForUser([messageId], userId)).get(messageId) ?? [];
+  return existing ? { updated: true, reactions } : { added: true, reactions };
 }
 
 export async function loadReactionsForMessages(messageIds: string[]) {

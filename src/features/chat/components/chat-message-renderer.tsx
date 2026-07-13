@@ -14,6 +14,7 @@ import { PredictionResultShareCard } from "@/features/chat/components/chat-messa
 import { DuelChallengeCard } from "@/features/chat/components/chat-message-cards/duel-challenge-card";
 import { useToast } from "@/shared/components/ui/toast";
 import { renderChatMentionBody } from "@/shared/lib/chat-mentions";
+import type { ChatReactionSummary } from "@/shared/types/chat";
 
 function renderMentionBody(body: string) {
   return renderChatMentionBody(body, "font-semibold text-sky-400");
@@ -41,7 +42,7 @@ export function ChatMessageRenderer({
 }: {
   message: ChatMessageDto;
   onProfileClick?: (slug: string) => void;
-  onReacted?: () => void;
+  onReacted?: (messageId: string, reactions: ChatReactionSummary[]) => void;
   onReply?: (reply: ChatReplyPreviewDto) => void;
   onEdit?: (message: ChatMessageDto) => void;
   onReplyQuoteClick?: (messageId: string) => void;
@@ -68,7 +69,7 @@ export function ChatMessageRenderer({
       toast(data.error ?? "خطا", "error");
       return;
     }
-    onReacted?.();
+    onReacted?.(message.id, data.reactions ?? []);
   };
 
   const report = async () => {

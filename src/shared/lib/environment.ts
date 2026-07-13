@@ -38,6 +38,11 @@ export function isBordinIrHost(hostname: string): boolean {
   return BORDIN_IR_HOSTS.has(normalizeHostname(hostname));
 }
 
+export function isBordinTestHost(hostname: string): boolean {
+  if (!hostname.trim()) return false;
+  return BORDINTEST_HOSTS.has(normalizeHostname(hostname));
+}
+
 function isLocalHostname(hostname: string): boolean {
   const h = normalizeHostname(hostname);
   return h === "localhost" || h === "127.0.0.1" || h === "::1" || h.endsWith(".localhost");
@@ -110,6 +115,7 @@ export function resolvePublicAppOrigin(request?: Pick<Request, "headers">): stri
 }
 
 const DEFAULT_PRODUCTION_SOCIAL_MIRROR = "https://bordin-open.bordinir.workers.dev";
+const DEFAULT_STAGING_SOCIAL_MIRROR = "https://bordintest-open.bordinir.workers.dev";
 
 function sanitizeSocialMirrorOrigin(value?: string | null): string | null {
   if (!value?.trim()) return null;
@@ -126,7 +132,11 @@ export function resolveSocialShareOrigin(request?: Pick<Request, "headers">): st
     sanitizeSocialMirrorOrigin(process.env.NEXT_PUBLIC_BORDIN_SOCIAL_MIRROR_URL);
   if (fromEnv) return fromEnv;
 
-  if (isProductionEnvironment() && !isStagingEnvironment()) {
+  if (isStagingEnvironment()) {
+    return DEFAULT_STAGING_SOCIAL_MIRROR;
+  }
+
+  if (isProductionEnvironment()) {
     return DEFAULT_PRODUCTION_SOCIAL_MIRROR;
   }
 

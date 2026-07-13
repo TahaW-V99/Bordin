@@ -3,6 +3,7 @@ import type { NextRequest } from "next/server";
 import { jwtVerify } from "jose";
 import {
   isBordinIrHost,
+  isBordinTestHost,
   isProductionEnvironment,
   isStagingEnvironment,
   normalizeHostname,
@@ -52,13 +53,44 @@ const IN_APP_BROWSER_UA =
   /Telegram|Instagram|FBAN|FBAV|Line\/|Twitter|Snapchat|WhatsApp/i;
 
 function redirectInAppBrowserToMirror(request: NextRequest): NextResponse | null {
-  if (!isProductionEnvironment() || isStagingEnvironment()) return null;
+  if (!isProductionEnvironment() && !isStagingEnvironment()) return null;
 
   const host = request.headers.get("host");
-  if (!host || !isBordinIrHost(normalizeHostname(host))) return null;
+  if (!host) return null;
+
+  const normalized = normalizeHostname(host);
+  const onProductionHost = isBordinIrHost(normalized) && isProductionEnvironment();
+  const onStagingHost = isBordinTestHost(normalized) && isStagingEnvironment();
+  if (!onProductionHost && !onStagingHost) return null;
 
   const ua = request.headers.get("user-agent") ?? "";
   if (!IN_APP_BROWSER_UA.test(ua)) return null;
+
+  const mirrorBase = resolveSocialShareOrigin(request);
+  const target = new URL(
+    `${request.nextUrl.pathname}${request.nextUrl.search}`,
+    mirrorBase,
+  );
+  return NextResponse.redirect(target, 302);
+}
+
+function redirectOffshoreClientToMirror(request: NextRequest): NextResponse | null {
+  if (!isProductionEnvironment() && !isStagingEnvironment()) return null;
+
+  const country =
+    request.headers.get("cf-ipcountry") ?? request.headers.get("CF-IPCountry");
+  if (!country || country === "XX" || country === "T1" || country === "IR") return null;
+
+  const host = request.headers.get("host");
+  if (!host) return null;
+
+  const normalized = normalizeHostname(host);
+  const onProductionHost = isBordinIrHost(normalized) && isProductionEnvironment();
+  const onStagingHost = isBordinTestHost(normalized) && isStagingEnvironment();
+  if (!onProductionHost && !onStagingHost) return null;
+
+  const ua = request.headers.get("user-agent") ?? "";
+  if (IN_APP_BROWSER_UA.test(ua)) return null;
 
   const mirrorBase = resolveSocialShareOrigin(request);
   const target = new URL(
@@ -74,6 +106,9 @@ export async function middleware(request: NextRequest) {
 
   const mirrorRedirect = redirectInAppBrowserToMirror(request);
   if (mirrorRedirect) return mirrorRedirect;
+
+  const offshoreMirrorRedirect = redirectOffshoreClientToMirror(request);
+  if (offshoreMirrorRedirect) return offshoreMirrorRedirect;
 
   const { pathname } = request.nextUrl;
   const token = request.cookies.get("bordin_session")?.value;

@@ -21,7 +21,6 @@ import {
   resolveTeamCompetitionBadgesForMatches,
   type TeamCompetitionKandakatorBadge,
 } from "@/server/services/team-competition-kandakator-badge-service";
-import { ensureKandakatorIngestedForDates } from "@/server/services/kandakator-display-ingest";
 import {
   settleKandakatorFinishedMatches,
   settleMatchPredictions,
@@ -337,7 +336,7 @@ export async function getKandakatorForDate(userId: string, dateKey?: string) {
           !isMatchResultKnown(km.match) &&
           km.match.kickoffAt.getTime() <= Date.now(),
       ) ??
-        true);
+        false);
 
     if (needsFreshApi) {
       try {
@@ -345,7 +344,7 @@ export async function getKandakatorForDate(userId: string, dateKey?: string) {
       } catch {
         // fallback to seed data below
       }
-    } else if (isFootballDataConfigured()) {
+    } else if (!existing && isFootballDataConfigured()) {
       try {
         await hydrateMemoryKandakatorFromApi(targetKey);
       } catch {
@@ -366,19 +365,21 @@ export async function getKandakatorForDate(userId: string, dateKey?: string) {
     ? filterMatchesForTehranDate(kandakator.matches, targetKey)
     : [];
 
-  if (initialDayMatches.length === 0) {
-    await ensureKandakatorIngestedForDates(scoreRefreshDateKeys(targetKey), {
-      source: "kandakator-read",
-      waitMs: 40_000,
-    });
-    await awaitKandakatorScoreRefresh(scoreRefreshDateKeys(targetKey), {
-      waitForUpdate: true,
-      waitMs: 8_000,
-    });
+  // Empty day: return fast when a published row already exists. Only do a quick
+  // queue pass when nothing is published yet (first load after deploy / cron lag).
+  if (initialDayMatches.length === 0 && !kandakator) {
+    try {
+      const { processKandakatorSyncQueue } = await import(
+        "@/server/services/kandakator-sync-queue-processor"
+      );
+      await processKandakatorSyncQueue(4);
+    } catch {
+      // background scheduler may still catch up
+    }
     kandakator = await loadPublishedKandakatorWithMatches(targetKey);
-  } else {
-    void awaitKandakatorScoreRefresh(scoreRefreshDateKeys(targetKey), { waitForUpdate: false });
   }
+
+  void awaitKandakatorScoreRefresh(scoreRefreshDateKeys(targetKey), { waitForUpdate: false });
 
   if (!kandakator) return null;
 

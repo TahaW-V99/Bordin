@@ -10,9 +10,9 @@ function hashSeed(seed: string) {
 }
 
 /** چیدمان ثابت روزانهِ مقادیر روی گردونه (برای هماهنگی UI و سرور) */
-export function buildWheelSegmentLayout(userId: string, dateKey: string) {
-  const amounts = WHEEL_REWARD_OPTIONS.map((o) => o.amount);
-  const arr = [...amounts];
+export function buildWheelSegmentLayout(userId: string, dateKey: string, amounts?: number[]) {
+  const sourceAmounts = amounts?.length ? amounts : WHEEL_REWARD_OPTIONS.map((o) => o.amount);
+  const arr = [...sourceAmounts];
   let state = hashSeed(`${userId}:${dateKey}`);
 
   for (let i = arr.length - 1; i > 0; i--) {

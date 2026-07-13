@@ -15,7 +15,11 @@ import {
 } from "@/server/services/match-lifecycle-logger";
 import { recordKandakatorSync } from "@/server/services/kandakator-sync-health";
 import { enqueueKandakatorSyncDates } from "@/server/services/kandakator-sync-queue-service";
-import { getRecentTehranDateKeys, countPublishedMatchesForDate } from "@/server/services/kandakator-display-ingest";
+import {
+  getRecentTehranDateKeys,
+  countPublishedMatchesForDate,
+  hasPublishedKandakatorForDate,
+} from "@/server/services/kandakator-display-ingest";
 import { settleAllFinishedMatches } from "@/server/services/settlement-service";
 
 export type ReconciliationResult = {
@@ -166,7 +170,11 @@ export async function runKandakatorReconciliation(): Promise<ReconciliationResul
     }
 
     for (const dateKey of getRecentTehranDateKeys(10)) {
-      if ((await countPublishedMatchesForDate(dateKey)) === 0) {
+      const [matchCount, hasPublished] = await Promise.all([
+        countPublishedMatchesForDate(dateKey),
+        hasPublishedKandakatorForDate(dateKey),
+      ]);
+      if (matchCount === 0 && !hasPublished) {
         dateKeys.add(dateKey);
       }
     }

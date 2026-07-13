@@ -3,4 +3,21 @@ main = "src/index.ts"
 compatibility_date = "2024-09-23"
 
 [vars]
-ORIGIN = "https://bordin.ir"
+ORIGIN = "https://bordin.liara.run"
+STAGING_ORIGIN = "https://bordintest.liara.run"
+
+[[routes]]
+pattern = "bordin.ir/*"
+zone_name = "bordin.ir"
+
+[[routes]]
+pattern = "www.bordin.ir/*"
+zone_name = "bordin.ir"
+
+[env.staging]
+name = "bordintest-open"
+routes = []
+
+[env.staging.vars]
+ORIGIN = "https://bordintest.liara.run"
+STAGING_ORIGIN = "https://bordintest.liara.run"

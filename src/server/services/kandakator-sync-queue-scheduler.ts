@@ -31,13 +31,17 @@ async function runQueueCycle() {
       import("@/server/services/kandakator-sync-queue-processor"),
       import("@/server/services/kandakator-sync-queue-service"),
     ]);
-    const { countPublishedMatchesForDate, getRecentTehranDateKeys } = await import(
+    const { countPublishedMatchesForDate, getRecentTehranDateKeys, hasPublishedKandakatorForDate } = await import(
       "@/server/services/kandakator-display-ingest"
     );
     const recentDates = getRecentTehranDateKeys(10);
     const missingDates: string[] = [];
     for (const dateKey of recentDates) {
-      if ((await countPublishedMatchesForDate(dateKey)) === 0) {
+      const [matchCount, hasPublished] = await Promise.all([
+        countPublishedMatchesForDate(dateKey),
+        hasPublishedKandakatorForDate(dateKey),
+      ]);
+      if (matchCount === 0 && !hasPublished) {
         missingDates.push(dateKey);
       }
     }

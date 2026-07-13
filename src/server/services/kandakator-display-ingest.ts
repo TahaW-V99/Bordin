@@ -29,6 +29,23 @@ export async function countPublishedMatchesForDate(dateKey: string) {
   });
 }
 
+export async function hasPublishedKandakatorForDate(dateKey: string) {
+  if (await shouldUseMemoryDb()) return false;
+
+  const dayStart = kandakatorDateFromKey(dateKey);
+  const dayEnd = addDays(dayStart, 1);
+
+  const row = await prisma.dailyKandakator.findFirst({
+    where: {
+      isPublished: true,
+      date: { gte: dayStart, lt: dayEnd },
+    },
+    select: { id: true },
+  });
+
+  return Boolean(row);
+}
+
 export function getRecentTehranDateKeys(days = 7) {
   const todayKey = tehranDateKey(new Date());
   const today = kandakatorDateFromKey(todayKey);
@@ -41,6 +58,7 @@ export type EnsureIngestResult = {
   satisfied: boolean;
   waitedMs: number;
   matchCounts: Record<string, number>;
+  publishedDates: Record<string, boolean>;
 };
 
 /**
@@ -56,7 +74,7 @@ export async function ensureKandakatorIngestedForDates(
   const waitMs = options?.waitMs ?? DEFAULT_WAIT_MS;
 
   if (unique.length === 0 || (await shouldUseMemoryDb())) {
-    return { satisfied: true, waitedMs: 0, matchCounts: {} };
+    return { satisfied: true, waitedMs: 0, matchCounts: {}, publishedDates: {} };
   }
 
   try {
@@ -67,19 +85,32 @@ export async function ensureKandakatorIngestedForDates(
 
   const deadline = startedAt + waitMs;
   let matchCounts: Record<string, number> = {};
+  let publishedDates: Record<string, boolean> = {};
 
   while (Date.now() < deadline) {
-    matchCounts = Object.fromEntries(
-      await Promise.all(
-        unique.map(async (dateKey) => [dateKey, await countPublishedMatchesForDate(dateKey)] as const),
-      ),
+    const snapshots = await Promise.all(
+      unique.map(async (dateKey) => {
+        const [matchCount, hasPublished] = await Promise.all([
+          countPublishedMatchesForDate(dateKey),
+          hasPublishedKandakatorForDate(dateKey),
+        ]);
+        return [dateKey, { matchCount, hasPublished }] as const;
+      }),
     );
 
-    if (unique.every((dateKey) => (matchCounts[dateKey] ?? 0) > 0)) {
+    matchCounts = Object.fromEntries(
+      snapshots.map(([dateKey, snapshot]) => [dateKey, snapshot.matchCount]),
+    );
+    publishedDates = Object.fromEntries(
+      snapshots.map(([dateKey, snapshot]) => [dateKey, snapshot.hasPublished]),
+    );
+
+    if (unique.every((dateKey) => publishedDates[dateKey] || (matchCounts[dateKey] ?? 0) > 0)) {
       return {
         satisfied: true,
         waitedMs: Date.now() - startedAt,
         matchCounts,
+        publishedDates,
       };
     }
 
@@ -92,15 +123,27 @@ export async function ensureKandakatorIngestedForDates(
     await sleep(POLL_INTERVAL_MS);
   }
 
+  const finalSnapshots = await Promise.all(
+    unique.map(async (dateKey) => {
+      const [matchCount, hasPublished] = await Promise.all([
+        countPublishedMatchesForDate(dateKey),
+        hasPublishedKandakatorForDate(dateKey),
+      ]);
+      return [dateKey, { matchCount, hasPublished }] as const;
+    }),
+  );
+
   matchCounts = Object.fromEntries(
-    await Promise.all(
-      unique.map(async (dateKey) => [dateKey, await countPublishedMatchesForDate(dateKey)] as const),
-    ),
+    finalSnapshots.map(([dateKey, snapshot]) => [dateKey, snapshot.matchCount]),
+  );
+  publishedDates = Object.fromEntries(
+    finalSnapshots.map(([dateKey, snapshot]) => [dateKey, snapshot.hasPublished]),
   );
 
   return {
-    satisfied: unique.every((dateKey) => (matchCounts[dateKey] ?? 0) > 0),
+    satisfied: unique.every((dateKey) => publishedDates[dateKey] || (matchCounts[dateKey] ?? 0) > 0),
     waitedMs: Date.now() - startedAt,
     matchCounts,
+    publishedDates,
   };
 }

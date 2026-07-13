@@ -1,16 +1,47 @@
 /**
- * Public mirror for bordin.ir on Cloudflare edge.
- * Used when bordin.ir is blocked in Telegram/Instagram in-app browsers on mobile networks.
+ * Cloudflare edge proxy for bordin.ir / bordintest.ir.
+ * Fetches the Liara app origin so the site stays reachable when direct .ir access fails (e.g. VPN).
  */
 
 type Env = {
   ORIGIN?: string;
+  STAGING_ORIGIN?: string;
 };
 
-const DEFAULT_ORIGIN = "https://bordin.ir";
+const DEFAULT_PRODUCTION_ORIGIN = "https://bordin.liara.run";
+const DEFAULT_STAGING_ORIGIN = "https://bordintest.liara.run";
 
-function rewriteLocation(location: string, publicOrigin: string): string {
-  return location.replace(/^https?:\/\/(?:www\.)?bordin\.ir(?=\/|$)/i, publicOrigin);
+const LOCATION_HOSTS = [
+  "bordin.ir",
+  "www.bordin.ir",
+  "bordintest.ir",
+  "www.bordintest.ir",
+  "bordin.liara.run",
+  "bordintest.liara.run",
+];
+
+function isStagingHost(hostname: string): boolean {
+  return hostname.toLowerCase().includes("bordintest");
+}
+
+function resolveOrigin(incomingHost: string, env: Env): string {
+  if (isStagingHost(incomingHost)) {
+    return (env.STAGING_ORIGIN ?? DEFAULT_STAGING_ORIGIN).replace(/\/$/, "");
+  }
+  return (env.ORIGIN ?? DEFAULT_PRODUCTION_ORIGIN).replace(/\/$/, "");
+}
+
+function rewriteLocation(location: string, publicOrigin: string, origin: string): string {
+  let rewritten = location;
+  const hosts = [new URL(origin).host, ...LOCATION_HOSTS];
+  for (const host of hosts) {
+    const escaped = host.replace(/\./g, "\\.");
+    rewritten = rewritten.replace(
+      new RegExp(`^https?:\\/\\/(?:www\\.)?${escaped}(?=\\/|$)`, "i"),
+      publicOrigin,
+    );
+  }
+  return rewritten;
 }
 
 function rewriteSetCookie(cookie: string): string {
@@ -31,17 +62,27 @@ function appendRewrittenCookies(from: Headers, to: Headers) {
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    const origin = (env.ORIGIN ?? DEFAULT_ORIGIN).replace(/\/$/, "");
     const incoming = new URL(request.url);
+    const origin = resolveOrigin(incoming.hostname, env);
     const publicOrigin = incoming.origin;
     const target = new URL(incoming.pathname + incoming.search, `${origin}/`);
 
     const headers = new Headers(request.headers);
     headers.set("Host", new URL(origin).host);
-    headers.set("X-Forwarded-Host", new URL(origin).host);
-    headers.set("X-Forwarded-Proto", "https");
+    headers.set("X-Forwarded-Host", incoming.host);
+    headers.set("X-Forwarded-Proto", incoming.protocol.replace(":", ""));
 
-    const init: RequestInit & { cf?: { cacheTtl?: number } } = {
+    const cf = (request as Request & { cf?: { country?: string } }).cf;
+    if (cf?.country) {
+      headers.set("CF-IPCountry", cf.country);
+    }
+
+    const clientIp = request.headers.get("CF-Connecting-IP");
+    if (clientIp) {
+      headers.set("X-Forwarded-For", clientIp);
+    }
+
+    const init: RequestInit = {
       method: request.method,
       headers,
       redirect: "manual",
@@ -56,7 +97,7 @@ export default {
 
     const location = outHeaders.get("Location");
     if (location) {
-      outHeaders.set("Location", rewriteLocation(location, publicOrigin));
+      outHeaders.set("Location", rewriteLocation(location, publicOrigin, origin));
     }
 
     outHeaders.delete("Set-Cookie");

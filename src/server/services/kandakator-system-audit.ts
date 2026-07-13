@@ -8,6 +8,7 @@ import { getKandakatorSyncQueueStats } from "@/server/services/kandakator-sync-q
 import {
   countPublishedMatchesForDate,
   getRecentTehranDateKeys,
+  hasPublishedKandakatorForDate,
 } from "@/server/services/kandakator-display-ingest";
 import { getCloudflareSyncUrl } from "@/server/services/kandakator-remote-sync-service";
 
@@ -71,24 +72,19 @@ export async function runKandakatorSystemAudit(): Promise<KandakatorSystemAudit>
   const dateKeys = getRecentTehranDateKeys(7);
   const lastSevenDays = await Promise.all(
     dateKeys.map(async (dateKey) => {
-      const dayStart = kandakatorDateFromKey(dateKey);
-      const dayEnd = addDays(dayStart, 1);
-      const [matchCount, kandakator] = await Promise.all([
+      const [matchCount, hasKandakator] = await Promise.all([
         countPublishedMatchesForDate(dateKey),
-        prisma.dailyKandakator.findFirst({
-          where: { isPublished: true, date: { gte: dayStart, lt: dayEnd } },
-          select: { id: true },
-        }),
+        hasPublishedKandakatorForDate(dateKey),
       ]);
       return {
         dateKey,
         matchCount,
-        hasKandakator: Boolean(kandakator),
+        hasKandakator,
       };
     }),
   );
 
-  const missingRecords = lastSevenDays.filter((row) => row.matchCount === 0).length;
+  const missingRecords = lastSevenDays.filter((row) => row.matchCount === 0 && !row.hasKandakator).length;
   let dataStatus: "OK" | "EMPTY" | "PARTIAL" = "OK";
   if (missingRecords === lastSevenDays.length) dataStatus = "EMPTY";
   else if (missingRecords > 0) dataStatus = "PARTIAL";

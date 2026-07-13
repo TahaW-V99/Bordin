@@ -332,9 +332,9 @@ export function TeamCompetitionDetail({ competitionId }: { competitionId: string
                 <p className="mt-2 text-white/55">
                   {formatPersianNumber((bracket?.teams as unknown[])?.length ?? 0)} تیم
                 </p>
-                {comp.knockoutEndsAt ? (
+                {comp.currentStageEndsAt ? (
                   <p className="mt-1 text-white/45">
-                    پایان مرحله حذفی: {formatTehranDateTime(comp.knockoutEndsAt as string)}
+                    پایان مرحله فعلی رقابت: {formatTehranDateTime(comp.currentStageEndsAt as string)}
                   </p>
                 ) : null}
               </div>

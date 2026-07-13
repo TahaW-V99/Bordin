@@ -10,6 +10,7 @@ import {
   computeWheelRotation,
 } from "@/features/wheel/components/fortune-wheel";
 import { WheelSpinCostModal } from "@/features/wheel/components/wheel-spin-cost-modal";
+import { WHEEL_REWARD_OPTIONS } from "@/shared/constants/wheel";
 
 type WheelStatus = {
   canSpin: boolean;
@@ -78,7 +79,7 @@ export function WheelPage() {
     }
 
     const targetRotation =
-      rotationBase.current + computeWheelRotation(data.segmentIndex);
+      rotationBase.current + computeWheelRotation(data.segmentIndex, status?.segmentLayout.length ?? 0);
     const targetBallRotation = ballRotation - targetRotation * 0.45;
 
     setWheelRotation(targetRotation);
@@ -111,9 +112,9 @@ export function WheelPage() {
   };
 
   const segments =
-    status?.segmentLayout.length === 10
+    status?.segmentLayout.length === WHEEL_REWARD_OPTIONS.length
       ? status.segmentLayout
-      : [300, 350, 450, 500, 600, 700, 800, 1000, 1200, 1500];
+      : WHEEL_REWARD_OPTIONS.map((option) => option.amount);
 
   return (
     <>

@@ -91,12 +91,12 @@ export async function processTeamCompetition(teamCompetitionId: string) {
   if (comp.stage === TeamCompetitionStage.KNOCKOUT) {
     const currentRound = await getActiveKnockoutRound(teamCompetitionId, comp.knockoutRounds);
     if (currentRound) {
-      const shouldResolve = comp.usesRuleBasedStages
-        ? await (async () => {
-            const config = await loadKnockoutRoundStageConfig(currentRound.id);
-            return config ? await isRuleBasedStageComplete(config) : false;
-          })()
-        : Boolean(currentRound.endsAt && now > currentRound.endsAt);
+      const shouldResolve = await (async () => {
+        if (!currentRound.endsAt || now <= currentRound.endsAt) return false;
+        if (!comp.usesRuleBasedStages) return true;
+        const config = await loadKnockoutRoundStageConfig(currentRound.id);
+        return config ? await isRuleBasedStageComplete(config) : true;
+      })();
       if (shouldResolve) {
         await resolveKnockoutRound(teamCompetitionId, currentRound.id);
       }

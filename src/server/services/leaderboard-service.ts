@@ -78,6 +78,23 @@ export async function getEligibleGlobalRankForUser(userId: string): Promise<numb
   return all.find((row) => row.userId === userId)?.rank ?? null;
 }
 
+export async function getEligibleGlobalRanksForUsers(userIds: string[]): Promise<Map<string, number>> {
+  const uniqueUserIds = [...new Set(userIds.filter(Boolean))];
+  if (uniqueUserIds.length === 0) return new Map();
+
+  const all = await buildEligibleGlobalLeaderboard();
+  const wanted = new Set(uniqueUserIds);
+  const ranks = new Map<string, number>();
+
+  for (const row of all) {
+    if (wanted.has(row.userId)) {
+      ranks.set(row.userId, row.rank);
+    }
+  }
+
+  return ranks;
+}
+
 export async function getGlobalLeaderboardForUser(userId: string) {
   const all = await buildEligibleGlobalLeaderboard();
   const leaderboard = all.slice(0, 100);

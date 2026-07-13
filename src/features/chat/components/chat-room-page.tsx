@@ -19,7 +19,7 @@ import {
   CHAT_DISPLAY_NAME_REQUIRED_ERROR,
   CHAT_UNREAD_UPDATED_EVENT,
 } from "@/shared/constants/chat";
-import type { ChatReplyPreviewDto, ChatRoomDetailDto } from "@/shared/types/chat";
+import type { ChatReactionSummary, ChatReplyPreviewDto, ChatRoomDetailDto } from "@/shared/types/chat";
 
 function chatBackHref(slug: string) {
   if (slug === "teams-all" || slug.startsWith("team-")) return "/chat/teams";
@@ -132,7 +132,15 @@ export function ChatRoomPage({ slug }: { slug: string }) {
       }
       setReplyTo(null);
       setEditingMessage(null);
-      await load(true);
+      setDetail((prev) =>
+        prev
+          ? {
+              ...prev,
+              messages: [...prev.messages, data.message],
+            }
+          : prev,
+      );
+      dispatchUnreadUpdate();
     } catch (e) {
       toast(e instanceof Error ? e.message : "خطا", "error");
     } finally {
@@ -166,6 +174,19 @@ export function ChatRoomPage({ slug }: { slug: string }) {
 
   const scrollToBottom = () => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  const updateMessageReactions = (messageId: string, reactions: ChatReactionSummary[]) => {
+    setDetail((prev) =>
+      prev
+        ? {
+            ...prev,
+            messages: prev.messages.map((message) =>
+              message.id === messageId ? { ...message, reactions } : message,
+            ),
+          }
+        : prev,
+    );
   };
 
   if (loading && !detail) {
@@ -243,7 +264,7 @@ export function ChatRoomPage({ slug }: { slug: string }) {
                     key={message.id}
                     message={message}
                     onProfileClick={openProfile}
-                    onReacted={() => void load(true)}
+                    onReacted={updateMessageReactions}
                     onReply={(nextReply) => {
                       setEditingMessage(null);
                       setReplyTo(nextReply);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+ import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { Check, Search, Send, Swords, X } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
@@ -65,10 +65,11 @@ export function ChatComposer({
   const [participants, setParticipants] = useState<ChatMentionCandidateDto[]>([]);
   const [mentionLoading, setMentionLoading] = useState(false);
   const [mentionSearch, setMentionSearch] = useState("");
-  const [selectedMentionKeys, setSelectedMentionKeys] = useState<Set<string>>(new Set());
+  const [selectedMentions, setSelectedMentions] = useState<Map<string, ChatMentionCandidateDto>>(new Map());
   const [mentionMeta, setMentionMeta] = useState<ComposerMentionMeta>(new Map());
   const [cursorPos, setCursorPos] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
   const blocked = disabled || loading;
   const mentionEnabled = isMentionEnabledChatParam(roomSlug);
   const teamMentionMode = isTeamMentionChatParam(roomSlug);
@@ -93,7 +94,7 @@ export function ChatComposer({
     if (!mention) {
       setParticipants([]);
       setMentionSearch("");
-      setSelectedMentionKeys(new Set());
+      setSelectedMentions(new Map());
       return;
     }
     const q = mentionSearch.trim() || mention.query.trim();
@@ -128,21 +129,19 @@ export function ChatComposer({
 
   const toggleMentionSelection = (participant: ChatMentionCandidateDto) => {
     const key = mentionCandidateKey(participant);
-    setSelectedMentionKeys((prev) => {
-      const next = new Set(prev);
+    setSelectedMentions((prev) => {
+      const next = new Map(prev);
       if (next.has(key)) next.delete(key);
-      else next.add(key);
+      else next.set(key, participant);
       return next;
     });
   };
 
   const applySelectedMentions = () => {
     const textarea = textareaRef.current;
-    if (!textarea || !mention || selectedMentionKeys.size === 0) return;
+    if (!textarea || !mention || selectedMentions.size === 0) return;
 
-    const selected = participants.filter((participant) =>
-      selectedMentionKeys.has(mentionCandidateKey(participant)),
-    );
+    const selected = [...selectedMentions.values()];
     if (selected.length === 0) return;
 
     const cursor = textarea.selectionStart ?? text.length;
@@ -172,7 +171,7 @@ export function ChatComposer({
       return next;
     });
     setText(nextValue);
-    setSelectedMentionKeys(new Set());
+    setSelectedMentions(new Map());
     setMentionSearch("");
 
     requestAnimationFrame(() => {
@@ -181,6 +180,12 @@ export function ChatComposer({
       textarea.setSelectionRange(pos, pos);
       setCursorPos(pos);
     });
+  };
+
+  const syncOverlayScroll = () => {
+    if (textareaRef.current && overlayRef.current) {
+      overlayRef.current.scrollTop = textareaRef.current.scrollTop;
+    }
   };
 
   return (
@@ -216,7 +221,7 @@ export function ChatComposer({
                 <div className="space-y-1">
                   {participants.map((participant) => {
                     const key = mentionCandidateKey(participant);
-                    const selected = selectedMentionKeys.has(key);
+                    const selected = selectedMentions.has(key);
                     return (
                       <button
                         key={
@@ -280,7 +285,7 @@ export function ChatComposer({
               <Button
                 size="sm"
                 fullWidth
-                disabled={selectedMentionKeys.size === 0}
+                disabled={selectedMentions.size === 0}
                 onClick={applySelectedMentions}
               >
                 افزودن منشن
@@ -325,10 +330,11 @@ export function ChatComposer({
         </div>
       ) : null}
       <div className="flex items-end gap-2">
-        <div className="relative max-h-28 min-h-[3rem] flex-1">
+        <div className="relative h-16 flex-1">
           <div
+            ref={overlayRef}
             aria-hidden
-            className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words rounded-2xl border border-transparent px-3 py-2 text-sm leading-6 text-white"
+            className="pointer-events-none absolute inset-0 overflow-y-auto whitespace-pre-wrap break-words rounded-2xl border border-transparent px-3 py-2 text-sm leading-6 text-white"
           >
             {text ? renderChatMentionBody(text) : null}
           </div>
@@ -342,6 +348,7 @@ export function ChatComposer({
             onSelect={syncCursor}
             onKeyUp={syncCursor}
             onClick={syncCursor}
+            onScroll={syncOverlayScroll}
             disabled={blocked}
             rows={2}
             placeholder={
@@ -351,7 +358,7 @@ export function ChatComposer({
                   ? "پیام خود را ویرایش کنید…"
                   : "پیام متنی بنویسید…"
             }
-            className="relative max-h-28 min-h-[3rem] w-full resize-none rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm leading-6 text-transparent caret-white outline-none placeholder:text-white/30 focus:border-bordin-orange/50 disabled:opacity-50"
+            className="relative h-16 w-full resize-none overflow-y-auto rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm leading-6 text-transparent caret-white outline-none placeholder:text-white/30 focus:border-bordin-orange/50 disabled:opacity-50"
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();

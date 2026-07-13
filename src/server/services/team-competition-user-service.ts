@@ -1,4 +1,9 @@
-import { NotificationCategory, NotificationType, TeamCompetitionFeeCoverReason } from "@prisma/client";
+import {
+  NotificationCategory,
+  NotificationType,
+  TeamCompetitionFeeCoverReason,
+  TeamCompetitionStage,
+} from "@prisma/client";
 import { prisma } from "@/shared/lib/prisma";
 import { shouldUseMemoryDb } from "@/server/db";
 import { createNotification } from "@/server/services/notification-service";
@@ -31,6 +36,35 @@ function displayName(user: {
   profile: { displayName: string | null } | null;
 }) {
   return user.profile?.displayName ?? user.username ?? "کاربر";
+}
+
+function resolveCurrentStageEndsAt(comp: {
+  stage: TeamCompetitionStage;
+  rankingEndsAt: Date;
+  knockoutRounds: Array<{ startsAt: Date | null; endsAt: Date | null }>;
+}) {
+  if (comp.stage === TeamCompetitionStage.RANKING) {
+    return comp.rankingEndsAt;
+  }
+
+  if (comp.stage !== TeamCompetitionStage.KNOCKOUT) {
+    return null;
+  }
+
+  const now = new Date();
+  const rounds = comp.knockoutRounds;
+  if (!rounds.length) return null;
+
+  const activeRound =
+    rounds.find((round) => {
+      if (round.startsAt && now < round.startsAt) return false;
+      if (round.endsAt && now <= round.endsAt) return true;
+      return false;
+    }) ??
+    rounds.find((round) => round.endsAt && now <= round.endsAt) ??
+    rounds[rounds.length - 1];
+
+  return activeRound?.endsAt ?? null;
 }
 
 async function serializeCompetitionListItem(
@@ -242,6 +276,8 @@ export async function getTeamCompetitionDetailForUser(competitionId: string, use
       ),
     }));
 
+  const currentStageEndsAt = resolveCurrentStageEndsAt(comp);
+
   return {
     id: comp.id,
     titleFa: comp.titleFa,
@@ -257,6 +293,7 @@ export async function getTeamCompetitionDetailForUser(competitionId: string, use
     rankingPredictionFeePerMember: comp.rankingPredictionFeePerMember,
     knockoutStartsAt: comp.knockoutStartsAt?.toISOString() ?? null,
     knockoutEndsAt: comp.knockoutEndsAt?.toISOString() ?? null,
+    currentStageEndsAt: currentStageEndsAt?.toISOString() ?? null,
     winnerCoinReward: comp.winnerCoinReward,
     runnerUpCoinReward: comp.runnerUpCoinReward,
     stage: comp.stage,

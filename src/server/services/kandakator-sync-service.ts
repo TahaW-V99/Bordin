@@ -100,6 +100,33 @@ async function findKandakatorByDateKey(
   });
 }
 
+async function ensurePublishedKandakatorDay(
+  tx: Pick<typeof prisma, "dailyKandakator">,
+  dateKey: string,
+  publish?: boolean,
+) {
+  const existing = await findKandakatorByDateKey(tx, dateKey);
+  const dayDate = tehranDayStart(dateKey);
+
+  if (existing) {
+    return tx.dailyKandakator.update({
+      where: { id: existing.id },
+      data: {
+        ...(publish !== undefined ? { isPublished: publish } : { isPublished: true }),
+      },
+    });
+  }
+
+  return tx.dailyKandakator.create({
+    data: {
+      date: dayDate,
+      title: `کنداکتور ${formatShamsiFromDateKey(dateKey)}`,
+      isPublished: publish ?? true,
+      entryFeeCoins: 600,
+    },
+  });
+}
+
 function normalizeMatch(match: FootballDataMatch) {
   const { homeScore, awayScore } = readMatchScore(match);
   const status = mapFootballDataStatus(match.status) as MatchStatus;
@@ -258,12 +285,10 @@ export async function syncDailyKandakatorFromFootballMatches(
     if (!canDeleteKandakatorData(options)) {
       return preserveExistingKandakatorDay(dateKey, "empty_api_response", source, 0);
     }
-    const existing = await findKandakatorByDateKey(prisma, dateKey);
-    if (existing) {
-      await prisma.kandakatorMatch.deleteMany({ where: { kandakatorId: existing.id } });
-    }
+    const kandakator = await ensurePublishedKandakatorDay(prisma, dateKey, options?.publish);
+    await prisma.kandakatorMatch.deleteMany({ where: { kandakatorId: kandakator.id } });
     lastSyncAtByDate.set(dateKey, Date.now());
-    return { date: dateKey, matchCount: 0, kandakatorId: existing?.id ?? null };
+    return { date: dateKey, matchCount: 0, kandakatorId: kandakator.id };
   }
 
   const existingCountBeforeSync = await countKandakatorLinksForDate(dateKey);
@@ -298,28 +323,14 @@ export async function syncDailyKandakatorFromFootballMatches(
           return existing.id;
         }
       }
-      if (existing && canDeleteKandakatorData(options)) {
-        await tx.kandakatorMatch.deleteMany({ where: { kandakatorId: existing.id } });
+      const kandakator = await ensurePublishedKandakatorDay(tx, dateKey, options?.publish);
+      if (canDeleteKandakatorData(options)) {
+        await tx.kandakatorMatch.deleteMany({ where: { kandakatorId: kandakator.id } });
       }
-      return existing?.id ?? null;
+      return kandakator.id;
     }
 
-    const dayDate = tehranDayStart(dateKey);
-    const kandakator = existing
-      ? await tx.dailyKandakator.update({
-          where: { id: existing.id },
-          data: {
-            ...(options?.publish !== undefined ? { isPublished: options.publish } : { isPublished: true }),
-          },
-        })
-      : await tx.dailyKandakator.create({
-          data: {
-            date: dayDate,
-            title: `کنداکتور ${formatShamsiFromDateKey(dateKey)}`,
-            isPublished: options?.publish ?? true,
-            entryFeeCoins: 600,
-          },
-        });
+    const kandakator = await ensurePublishedKandakatorDay(tx, dateKey, options?.publish);
 
     const syncedMatchIds: string[] = [];
     let sortOrder = 0;
@@ -573,7 +584,9 @@ export async function prepareKandakatorForDisplay(dateKey: string) {
   const todayKey = tehranDateKey(new Date());
   const datesToEnqueue = new Set<string>();
   if (!existing?.matches.length) {
-    datesToEnqueue.add(dateKey);
+    if (!existing) {
+      datesToEnqueue.add(dateKey);
+    }
   } else {
     const needs = kandakatorNeedsApiRefresh(dateKey, existing);
     if (needs) {

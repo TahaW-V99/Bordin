@@ -2,6 +2,7 @@ import {
   countPublishedMatchesForDate,
   ensureKandakatorIngestedForDates,
   getRecentTehranDateKeys,
+  hasPublishedKandakatorForDate,
 } from "@/server/services/kandakator-display-ingest";
 import { runKandakatorSystemAudit } from "@/server/services/kandakator-system-audit";
 
@@ -54,13 +55,21 @@ export async function runEmergencyKandakatorRecovery(options?: {
     };
   }
 
-  const matchCountsBefore = Object.fromEntries(
-    await Promise.all(
-      dateKeys.map(async (dateKey) => [dateKey, await countPublishedMatchesForDate(dateKey)] as const),
-    ),
+  const beforeSnapshots = await Promise.all(
+    dateKeys.map(async (dateKey) => {
+      const [matchCount, hasPublished] = await Promise.all([
+        countPublishedMatchesForDate(dateKey),
+        hasPublishedKandakatorForDate(dateKey),
+      ]);
+      return [dateKey, { matchCount, hasPublished }] as const;
+    }),
   );
-
-  const missingBefore = dateKeys.filter((dateKey) => (matchCountsBefore[dateKey] ?? 0) === 0);
+  const matchCountsBefore = Object.fromEntries(
+    beforeSnapshots.map(([dateKey, snapshot]) => [dateKey, snapshot.matchCount]),
+  );
+  const missingBefore = beforeSnapshots
+    .filter(([, snapshot]) => snapshot.matchCount === 0 && !snapshot.hasPublished)
+    .map(([dateKey]) => dateKey);
 
   const [{ enqueueKandakatorSyncDates }, { processKandakatorSyncQueue }] = await Promise.all([
     import("@/server/services/kandakator-sync-queue-service"),
@@ -84,15 +93,28 @@ export async function runEmergencyKandakatorRecovery(options?: {
       waitMs,
     });
   } else {
+    const afterSnapshots = await Promise.all(
+      dateKeys.map(async (dateKey) => {
+        const [matchCount, hasPublished] = await Promise.all([
+          countPublishedMatchesForDate(dateKey),
+          hasPublishedKandakatorForDate(dateKey),
+        ]);
+        return [dateKey, { matchCount, hasPublished }] as const;
+      }),
+    );
     const matchCountsAfter = Object.fromEntries(
-      await Promise.all(
-        dateKeys.map(async (dateKey) => [dateKey, await countPublishedMatchesForDate(dateKey)] as const),
-      ),
+      afterSnapshots.map(([dateKey, snapshot]) => [dateKey, snapshot.matchCount]),
+    );
+    const publishedDates = Object.fromEntries(
+      afterSnapshots.map(([dateKey, snapshot]) => [dateKey, snapshot.hasPublished]),
     );
     ingest = {
-      satisfied: dateKeys.every((dateKey) => (matchCountsAfter[dateKey] ?? 0) > 0),
+      satisfied: dateKeys.every(
+        (dateKey) => publishedDates[dateKey] || (matchCountsAfter[dateKey] ?? 0) > 0,
+      ),
       waitedMs: 0,
       matchCounts: matchCountsAfter,
+      publishedDates,
     };
   }
 

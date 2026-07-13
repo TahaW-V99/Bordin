@@ -2,36 +2,35 @@
 
 import Image from "next/image";
 import { formatPersianNumber } from "@/shared/lib/dates";
-import { WHEEL_SEGMENT_COUNT } from "@/shared/constants/wheel";
 
 const SIZE = 300;
 const CX = SIZE / 2;
 const CY = SIZE / 2;
 const R = SIZE / 2 - 6;
 const HUB_R = 42;
-const SEG_ANGLE = 360 / WHEEL_SEGMENT_COUNT;
 
 function polar(cx: number, cy: number, r: number, angleDeg: number) {
   const rad = ((angleDeg - 90) * Math.PI) / 180;
   return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
 }
 
-function segmentPath(index: number) {
-  const start = index * SEG_ANGLE;
-  const end = start + SEG_ANGLE;
+function segmentPath(index: number, segmentAngle: number) {
+  const start = index * segmentAngle;
+  const end = start + segmentAngle;
   const p1 = polar(CX, CY, R, end);
   const p2 = polar(CX, CY, R, start);
-  const largeArc = SEG_ANGLE > 180 ? 1 : 0;
+  const largeArc = segmentAngle > 180 ? 1 : 0;
   return `M ${CX} ${CY} L ${p1.x} ${p1.y} A ${R} ${R} 0 ${largeArc} 0 ${p2.x} ${p2.y} Z`;
 }
 
-function segmentLabelPosition(index: number) {
-  const angle = index * SEG_ANGLE + SEG_ANGLE / 2;
+function segmentLabelPosition(index: number, segmentAngle: number) {
+  const angle = index * segmentAngle + segmentAngle / 2;
   return polar(CX, CY, R * 0.68, angle);
 }
 
-export function computeWheelRotation(segmentIndex: number, extraSpins = 6) {
-  const segmentCenter = segmentIndex * SEG_ANGLE + SEG_ANGLE / 2;
+export function computeWheelRotation(segmentIndex: number, segmentCount: number, extraSpins = 6) {
+  const segmentAngle = 360 / Math.max(segmentCount, 1);
+  const segmentCenter = segmentIndex * segmentAngle + segmentAngle / 2;
   return extraSpins * 360 + (360 - segmentCenter);
 }
 
@@ -48,6 +47,7 @@ export function FortuneWheel({
   ballRotation,
   spinning,
 }: FortuneWheelProps) {
+  const segmentAngle = 360 / Math.max(segments.length, 1);
   const spinTransition = spinning
     ? "transform 4.2s cubic-bezier(0.12, 0.75, 0.1, 1)"
     : "none";
@@ -67,12 +67,12 @@ export function FortuneWheel({
       >
         <svg viewBox={`0 0 ${SIZE} ${SIZE}`} className="h-full w-full">
           {segments.map((amount, index) => {
-            const label = segmentLabelPosition(index);
-            const textAngle = index * SEG_ANGLE + SEG_ANGLE / 2;
+            const label = segmentLabelPosition(index, segmentAngle);
+            const textAngle = index * segmentAngle + segmentAngle / 2;
             return (
               <g key={`${amount}-${index}`}>
                 <path
-                  d={segmentPath(index)}
+                  d={segmentPath(index, segmentAngle)}
                   fill={index % 2 === 0 ? "#1c1408" : "#111111"}
                   stroke="#ffa100"
                   strokeWidth="1.2"

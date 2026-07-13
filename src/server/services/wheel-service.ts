@@ -25,6 +25,27 @@ type WalletSnapshot = {
   purchasedCoins: number;
 };
 
+function getFallbackRewardOptions(): RewardOption[] {
+  return WHEEL_REWARD_OPTIONS.map((option) => ({
+    coins: option.amount,
+    weight: option.weight,
+  }));
+}
+
+function normalizeRewardOptions(options: RewardOption[]) {
+  if (options.length === 0) return getFallbackRewardOptions();
+
+  const seen = new Set<number>();
+  for (const option of options) {
+    if (option.coins <= 0 || option.weight <= 0 || seen.has(option.coins)) {
+      return getFallbackRewardOptions();
+    }
+    seen.add(option.coins);
+  }
+
+  return options;
+}
+
 function pickWeightedReward(options: RewardOption[]) {
   const totalWeight = options.reduce((sum, option) => sum + option.weight, 0);
   let roll = Math.random() * totalWeight;
@@ -98,13 +119,10 @@ async function getRewardOptions(): Promise<RewardOption[]> {
   });
 
   if (options.length === 0) {
-    return WHEEL_REWARD_OPTIONS.map((option) => ({
-      coins: option.amount,
-      weight: option.weight,
-    }));
+    return getFallbackRewardOptions();
   }
 
-  return options.map((option) => ({ coins: option.coins, weight: option.weight }));
+  return normalizeRewardOptions(options.map((option) => ({ coins: option.coins, weight: option.weight })));
 }
 
 function buildSpinCostInfo(
@@ -151,14 +169,18 @@ async function getWalletSnapshot(userId: string): Promise<WalletSnapshot> {
 
 export async function getWheelStatus(userId: string) {
   const dateKey = tehranDateKey(new Date());
-  const segmentLayout = buildWheelSegmentLayout(userId, dateKey);
+  const options = await getRewardOptions();
+  const segmentLayout = buildWheelSegmentLayout(
+    userId,
+    dateKey,
+    options.map((option) => option.coins),
+  );
   const canSpin = await canUserSpin(userId);
   const last = await getLastSpin(userId);
   const totalSpins = await getTotalSpinCount(userId);
   const wheelCoinsPerDay = await getWheelCoinsEarnedLast3Days(userId);
   const wallet = await getWalletSnapshot(userId);
   const costInfo = buildSpinCostInfo(totalSpins, wheelCoinsPerDay, wallet);
-  const options = await getRewardOptions();
 
   return {
     canSpin,
@@ -177,8 +199,12 @@ export async function spinWheel(userId: string) {
   }
 
   const dateKey = tehranDateKey(new Date());
-  const segmentLayout = buildWheelSegmentLayout(userId, dateKey);
   const options = await getRewardOptions();
+  const segmentLayout = buildWheelSegmentLayout(
+    userId,
+    dateKey,
+    options.map((option) => option.coins),
+  );
   const selected = pickWeightedReward(options);
   const segmentIndex = findSegmentIndex(segmentLayout, selected.coins);
 

@@ -44,22 +44,48 @@ async function getLastReadAt(userId: string, roomKey: string): Promise<Date | nu
   return row?.lastReadAt ?? null;
 }
 
+async function loadReadMap(userId: string) {
+  if (await shouldUseMemoryDb()) return new Map<string, Date>();
+
+  const rows = await prisma.chatRoomRead.findMany({
+    where: { userId },
+    select: { roomKey: true, lastReadAt: true },
+  });
+  return new Map(rows.map((row) => [row.roomKey, row.lastReadAt]));
+}
+
+async function loadActiveTeamIds(userId: string) {
+  if (await shouldUseMemoryDb()) return [] as string[];
+
+  const memberships = await prisma.teamMember.findMany({
+    where: {
+      userId,
+      team: { isSuspended: false, status: { in: ["ACTIVE", "FORMING"] } },
+    },
+    select: { teamId: true },
+  });
+
+  return memberships.map((membership) => membership.teamId);
+}
+
 async function countUnreadForRoomKey(
   userId: string,
   roomKey: string,
   roomSlug: ChatRoomSlug,
   teamId: string | null,
+  lastReadAt?: Date | null,
 ): Promise<number> {
   if (await shouldUseMemoryDb()) return 0;
 
-  const lastReadAt = await getLastReadAt(userId, roomKey);
+  const resolvedLastReadAt =
+    lastReadAt === undefined ? await getLastReadAt(userId, roomKey) : lastReadAt;
 
   return prisma.chatMessage.count({
     where: {
       roomSlug,
       teamId,
       userId: { not: userId },
-      ...(lastReadAt ? { createdAt: { gt: lastReadAt } } : {}),
+      ...(resolvedLastReadAt ? { createdAt: { gt: resolvedLastReadAt } } : {}),
     },
   });
 }
@@ -78,35 +104,51 @@ export async function getUnreadCountForRoomParam(userId: string, roomParam: stri
 export async function getTotalChatUnreadCount(userId: string): Promise<number> {
   if (await shouldUseMemoryDb()) return 0;
 
-  let total = 0;
+  const [readMap, teamIds] = await Promise.all([
+    loadReadMap(userId),
+    loadActiveTeamIds(userId),
+  ]);
+
+  const countPromises: Promise<number>[] = [];
 
   for (const room of CHAT_ROOMS) {
     if (room.slug === "teams") continue;
-    const roomKey = room.slug;
-    total += await countUnreadForRoomKey(
-      userId,
-      roomKey,
-      chatRoomSlugToDb(room.slug as ChatRoomSlugKey) as ChatRoomSlug,
-      null,
+    countPromises.push(
+      countUnreadForRoomKey(
+        userId,
+        room.slug,
+        chatRoomSlugToDb(room.slug as ChatRoomSlugKey) as ChatRoomSlug,
+        null,
+        readMap.get(room.slug) ?? null,
+      ),
     );
   }
 
-  total += await countUnreadForRoomKey(userId, "teams-all", ChatRoomSlug.TEAMS_ALL, null);
-
-  const memberships = await prisma.teamMember.findMany({
-    where: {
+  countPromises.push(
+    countUnreadForRoomKey(
       userId,
-      team: { isSuspended: false, status: { in: ["ACTIVE", "FORMING"] } },
-    },
-    select: { teamId: true },
-  });
+      "teams-all",
+      ChatRoomSlug.TEAMS_ALL,
+      null,
+      readMap.get("teams-all") ?? null,
+    ),
+  );
 
-  for (const { teamId } of memberships) {
+  for (const teamId of teamIds) {
     const roomKey = `team-${teamId}`;
-    total += await countUnreadForRoomKey(userId, roomKey, ChatRoomSlug.TEAMS, teamId);
+    countPromises.push(
+      countUnreadForRoomKey(
+        userId,
+        roomKey,
+        ChatRoomSlug.TEAMS,
+        teamId,
+        readMap.get(roomKey) ?? null,
+      ),
+    );
   }
 
-  return total;
+  const counts = await Promise.all(countPromises);
+  return counts.reduce((sum, count) => sum + count, 0);
 }
 
 export async function getUnreadCountsByRoomKey(userId: string): Promise<Record<string, number>> {
@@ -114,38 +156,44 @@ export async function getUnreadCountsByRoomKey(userId: string): Promise<Record<s
 
   if (await shouldUseMemoryDb()) return counts;
 
-  for (const room of CHAT_ROOMS) {
-    if (room.slug === "teams") continue;
-    counts[room.slug] = await countUnreadForRoomKey(
-      userId,
-      room.slug,
-      chatRoomSlugToDb(room.slug as ChatRoomSlugKey) as ChatRoomSlug,
-      null,
-    );
-  }
+  const [readMap, teamIds] = await Promise.all([
+    loadReadMap(userId),
+    loadActiveTeamIds(userId),
+  ]);
 
-  counts["teams-all"] = await countUnreadForRoomKey(
-    userId,
-    "teams-all",
-    ChatRoomSlug.TEAMS_ALL,
-    null,
+  const entries = [
+    ...CHAT_ROOMS.filter((room) => room.slug !== "teams").map((room) => ({
+      roomKey: room.slug,
+      roomSlug: chatRoomSlugToDb(room.slug as ChatRoomSlugKey) as ChatRoomSlug,
+      teamId: null as string | null,
+    })),
+    {
+      roomKey: "teams-all",
+      roomSlug: ChatRoomSlug.TEAMS_ALL,
+      teamId: null as string | null,
+    },
+    ...teamIds.map((teamId) => ({
+      roomKey: `team-${teamId}`,
+      roomSlug: ChatRoomSlug.TEAMS,
+      teamId,
+    })),
+  ];
+
+  const results = await Promise.all(
+    entries.map(async (entry) => ({
+      roomKey: entry.roomKey,
+      count: await countUnreadForRoomKey(
+        userId,
+        entry.roomKey,
+        entry.roomSlug,
+        entry.teamId,
+        readMap.get(entry.roomKey) ?? null,
+      ),
+    })),
   );
 
-  const memberships = await prisma.teamMember.findMany({
-    where: {
-      userId,
-      team: { isSuspended: false, status: { in: ["ACTIVE", "FORMING"] } },
-    },
-    select: { teamId: true },
-  });
-
-  for (const { teamId } of memberships) {
-    counts[`team-${teamId}`] = await countUnreadForRoomKey(
-      userId,
-      `team-${teamId}`,
-      ChatRoomSlug.TEAMS,
-      teamId,
-    );
+  for (const result of results) {
+    counts[result.roomKey] = result.count;
   }
 
   return counts;
