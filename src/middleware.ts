@@ -96,6 +96,7 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith("/_next") ||
     pathname.startsWith("/api/health") ||
     pathname.startsWith("/api/internal/") ||
+    pathname.startsWith("/api/team-competition-banners/") ||
     pathname.includes(".") ||
     isPublicProfileApi ||
     isPublicTeamApi ||

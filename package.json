@@ -48,6 +48,8 @@
     "db:push:production": "node scripts/production-db-push.mjs",
     "db:patch:production": "liara shell --app bordin --command \"node prisma/patch-production-db.mjs\"",
     "backfill:team-competition-banners:production": "liara shell --app bordin --command \"node prisma/backfill-team-competition-banners.mjs\"",
+    "repair:world-cup-banner:production": "liara shell --app bordin --command \"node prisma/repair-world-cup-banner.mjs\"",
+    "fix:world-cup-banner:production": "liara shell --app bordin --command \"node prisma/fix-banner-url.mjs\"",
     "make-admin:production": "node scripts/run-make-admin-production.mjs",
     "grant-admin:direct": "node scripts/grant-admin-direct.mjs",
     "grant:production:users": "liara shell --app bordin --command \"node prisma/apply-production-user-grants.mjs\"",

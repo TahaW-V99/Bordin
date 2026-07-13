@@ -21,6 +21,7 @@ import {
 } from "@/server/services/team-competition-registration-rules";
 import { KNOCKOUT_ROUND_LABELS_FA } from "@/shared/constants/team-competitions";
 import { resolveTeamLogoUrl } from "@/shared/constants/teams";
+import { resolveTeamCompetitionBannerUrl } from "@/shared/lib/team-competition-banner";
 import { aggregateRankingScoresForCompetition } from "@/server/services/team-competition-aggregation";
 
 export type TeamCompetitionUserFilter = "upcoming" | "active" | "finished";
@@ -46,7 +47,7 @@ async function serializeCompetitionListItem(
     id: comp.id,
     titleFa: comp.titleFa,
     description: comp.description,
-    bannerUrl: comp.bannerUrl,
+    bannerUrl: resolveTeamCompetitionBannerUrl(comp.bannerUrl),
     teamCapacity: comp.teamCapacity,
     registrationDeadline: comp.registrationDeadline.toISOString(),
     registrationFeePerMember: comp.registrationFeePerMember,
@@ -88,7 +89,7 @@ export async function listTeamCompetitionsForUser(userId: string, filter: TeamCo
         id: String(c.id),
         titleFa: String(c.titleFa ?? ""),
         description: (c.description as string | null | undefined) ?? null,
-        bannerUrl: (c.bannerUrl as string | null | undefined) ?? null,
+        bannerUrl: resolveTeamCompetitionBannerUrl(c.bannerUrl as string | null | undefined),
         teamCapacity: Number(c.teamCapacity ?? 16),
         registrationDeadline: new Date(c.registrationDeadline as string | Date).toISOString(),
         registrationFeePerMember: Number(c.registrationFeePerMember ?? 0),
@@ -245,7 +246,7 @@ export async function getTeamCompetitionDetailForUser(competitionId: string, use
     id: comp.id,
     titleFa: comp.titleFa,
     description: comp.description,
-    bannerUrl: comp.bannerUrl,
+    bannerUrl: resolveTeamCompetitionBannerUrl(comp.bannerUrl),
     teamCapacity: comp.teamCapacity,
     minTeamSize: comp.minTeamSize,
     maxTeamSize: comp.maxTeamSize,

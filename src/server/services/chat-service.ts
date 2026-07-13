@@ -28,6 +28,7 @@ import { loadReactionsForMessagesForUser } from "@/server/services/chat-social-s
 import { listMemorySystemMessages } from "@/server/services/chat-system-events";
 import { getEligibleGlobalRankForUser } from "@/server/services/leaderboard-service";
 import { getUnreadCountsByRoomKey } from "@/server/services/chat-unread-service";
+import { formatChatMentionPlainText } from "@/shared/lib/chat-mentions";
 import { userNeedsDisplayName } from "@/shared/lib/kandakator-utils";
 
 type MemoryChatRow = {
@@ -251,7 +252,8 @@ function serializeMemorySender(userId: string): ChatSenderDto {
 }
 
 function truncateReplyBody(body: string, max = 120) {
-  return body.length > max ? `${body.slice(0, max)}…` : body;
+  const plain = formatChatMentionPlainText(body);
+  return plain.length > max ? `${plain.slice(0, max)}…` : plain;
 }
 
 type ReplySourceRow = {

@@ -135,6 +135,7 @@ async function findCompetition(prisma) {
       titleFa: true,
       stage: true,
       teamCapacity: true,
+      bannerUrl: true,
       rankingEndsAt: true,
       rankingFinalizedAt: true,
       bracketGeneratedAt: true,
@@ -203,6 +204,9 @@ async function inspect(prisma) {
   }
 
   console.log("Competition:", comp);
+  if (comp.bannerUrl) {
+    console.log("bannerUrl:", comp.bannerUrl);
+  }
   const entries = await loadEntries(prisma, comp.id);
   console.log(
     "Entries:",

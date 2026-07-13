@@ -24,7 +24,8 @@ export function formatComposerMentionLabel(displayName: string) {
 export function formatChatMentionPlainText(body: string) {
   return body
     .replace(/@\[(?:user|team):[^|\]]+\|([^\]]+)\]/g, "@$1")
-    .replace(/@\[([^\]]+)\]/g, "@$1");
+    .replace(/@\[([^\]]+)\]/g, "@$1")
+    .replace(/@\[(?:user|team):[^\]]*$/g, "");
 }
 
 export function decodeMentionsForComposer(body: string): {
