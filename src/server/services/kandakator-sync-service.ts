@@ -594,7 +594,7 @@ export async function prepareKandakatorForDisplay(dateKey: string) {
   }
 
   if (datesToEnqueue.size > 0) {
-    await enqueueKandakatorSyncDates([...datesToEnqueue], "prepare-display");
+    void enqueueKandakatorSyncDates([...datesToEnqueue], "prepare-display").catch(() => {});
   }
 
   const hasSettleable = existing?.matches.some(({ match }) => isMatchResultKnown(match));

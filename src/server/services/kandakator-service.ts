@@ -1,4 +1,5 @@
 import { addDays } from "date-fns";
+import { TeamCompetitionStage } from "@prisma/client";
 import { prisma } from "@/shared/lib/prisma";
 import { devMemoryDb } from "@/server/dev-memory-db";
 import { shouldUseMemoryDb } from "@/server/db";
@@ -247,6 +248,44 @@ function scoreRefreshDateKeys(targetKey: string) {
   return [targetKey];
 }
 
+async function resolveKnockoutUiStatesForMatches(
+  userId: string,
+  kandakatorId: string,
+  matchIds: string[],
+): Promise<Map<string, KnockoutPredictionUiState | null>> {
+  const map = new Map<string, KnockoutPredictionUiState | null>();
+  if (matchIds.length === 0) return map;
+
+  const inKnockout = await prisma.teamMember.findFirst({
+    where: {
+      userId,
+      team: {
+        competitionEntries: {
+          some: {
+            isEliminated: false,
+            teamCompetition: { stage: TeamCompetitionStage.KNOCKOUT },
+          },
+        },
+      },
+    },
+    select: { id: true },
+  });
+
+  if (!inKnockout) {
+    for (const matchId of matchIds) map.set(matchId, null);
+    return map;
+  }
+
+  await Promise.all(
+    matchIds.map(async (matchId) => {
+      const state = await getKnockoutPredictionUiState(userId, matchId, kandakatorId);
+      map.set(matchId, state);
+    }),
+  );
+
+  return map;
+}
+
 async function buildKandakatorDto(
   userId: string,
   targetKey: string,
@@ -293,12 +332,10 @@ async function buildKandakatorDto(
     })),
   );
 
-  const knockoutUiByMatchId = new Map<string, KnockoutPredictionUiState | null>();
-  await Promise.all(
-    dayMatches.map(async (km) => {
-      const state = await getKnockoutPredictionUiState(userId, km.matchId, kandakator.id);
-      knockoutUiByMatchId.set(km.matchId, state);
-    }),
+  const knockoutUiByMatchId = await resolveKnockoutUiStatesForMatches(
+    userId,
+    kandakator.id,
+    matchIds,
   );
 
   const watchPartyByMatchId = await getWatchPartyMapForMatchIds(userId, matchIds);
@@ -367,28 +404,12 @@ export async function getKandakatorForDate(userId: string, dateKey?: string) {
     return serializeMemoryKandakator(userId, kandakator, targetKey);
   }
 
-  await prepareKandakatorForDisplay(targetKey);
+  void prepareKandakatorForDisplay(targetKey);
+  void awaitKandakatorScoreRefresh(scoreRefreshDateKeys(targetKey), {
+    waitForUpdate: false,
+  }).catch(() => {});
 
   let kandakator = await loadPublishedKandakatorWithMatches(targetKey);
-  const initialDayMatches = kandakator
-    ? filterMatchesForTehranDate(kandakator.matches, targetKey)
-    : [];
-
-  // Empty day: return fast when a published row already exists. Only do a quick
-  // queue pass when nothing is published yet (first load after deploy / cron lag).
-  if (initialDayMatches.length === 0 && !kandakator) {
-    try {
-      const { processKandakatorSyncQueue } = await import(
-        "@/server/services/kandakator-sync-queue-processor"
-      );
-      await processKandakatorSyncQueue(4);
-    } catch {
-      // background scheduler may still catch up
-    }
-    kandakator = await loadPublishedKandakatorWithMatches(targetKey);
-  }
-
-  void awaitKandakatorScoreRefresh(scoreRefreshDateKeys(targetKey), { waitForUpdate: false });
 
   if (!kandakator) return null;
 
@@ -410,11 +431,6 @@ export async function getKandakatorForDate(userId: string, dateKey?: string) {
     }
     return null;
   }
-
-  await settleKandakatorFinishedMatches(kandakator.id);
-
-  kandakator = await loadPublishedKandakatorWithMatches(targetKey);
-  if (!kandakator) return null;
 
   return buildKandakatorDto(userId, targetKey, kandakator);
 }
