@@ -12,6 +12,16 @@ export type ClientKandakatorMatch = {
     message: string | null;
     canSubmit: boolean;
   } | null;
+  watchParty?: {
+    roomId: string;
+    matchId: string;
+    capacity: number;
+    entryFeeCoins: number;
+    occupiedCount: number;
+    hasJoined: boolean;
+    uiPhase: "upcoming" | "active";
+    googleMeetUrl: string | null;
+  } | null;
   match: {
     id: string;
     homeTeamName: string;

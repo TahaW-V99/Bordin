@@ -15,6 +15,8 @@ export function LeagueAccordionGroup({
   needsDisplayName,
   onDisplayNameRequired,
   onSubmitted,
+  autoOpenWatchPartyMatchId,
+  onWatchPartyAutoOpened,
   defaultOpen = true,
 }: {
   leagueName: string;
@@ -25,6 +27,8 @@ export function LeagueAccordionGroup({
   needsDisplayName: boolean;
   onDisplayNameRequired: () => void;
   onSubmitted: () => void;
+  autoOpenWatchPartyMatchId?: string | null;
+  onWatchPartyAutoOpened?: () => void;
   defaultOpen?: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -54,12 +58,15 @@ export function LeagueAccordionGroup({
               entryFeeCoins={km.entryFeeCoins ?? entryFeeCoins}
               teamCompetitionBadges={km.teamCompetitionBadges}
               knockoutUiState={km.knockoutUiState}
+              watchParty={km.watchParty ?? null}
               predictionCutoffMinutes={km.predictionCutoffMinutes}
               existingPrediction={km.prediction}
               perfectReward={perfectReward}
               needsDisplayName={needsDisplayName}
               onDisplayNameRequired={onDisplayNameRequired}
               onSubmitted={onSubmitted}
+              autoOpenWatchParty={km.matchId === autoOpenWatchPartyMatchId}
+              onWatchPartyAutoOpened={onWatchPartyAutoOpened}
             />
           ))}
         </div>

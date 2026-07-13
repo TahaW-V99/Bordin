@@ -20,7 +20,7 @@ const TARGET_MATCHES = [
   [["امریکا", "آمریکا", "USA", "United States"], ["Bosnia", "Herzegovina", "Bosnia-Herzegovina", "بوسنی"]],
 ];
 
-/** Verified final scores when football-data.org fullTime is stale or missing. */
+/** Verified final scores when Fixture API fulltime is stale or missing. */
 const MANUAL_FINAL_SCORES = [
   {
     homeAliases: ["امریکا", "آمریکا", "USA", "United States"],
@@ -76,22 +76,35 @@ function matchIsTarget(match) {
 }
 
 function parseApiMatchId(externalId) {
-  const match = String(externalId ?? "").match(/football-data-(\d+)/);
-  return match ? Number(match[1]) : null;
+  const tail = String(externalId ?? "").split("-").pop();
+  const id = Number(tail);
+  return Number.isFinite(id) ? id : null;
 }
 
 function getApiKey() {
-  return (
-    process.env.FOOTBALL_DATA_API_KEY?.trim() ??
-    process.env.API_FOOTBALL_KEY?.trim() ??
-    ""
-  );
+  return process.env.FIXTURE_API_KEY?.trim() ?? "";
+}
+
+function mapApiFixture(row) {
+  const short = row.fixture?.status?.short ?? "NS";
+  const isFinished = ["FT", "AET", "PEN", "AWD", "WO"].includes(short);
+  const regularHome = row.goals?.home ?? row.score?.halftime?.home ?? null;
+  const regularAway = row.goals?.away ?? row.score?.halftime?.away ?? null;
+  const fullHome = row.score?.fulltime?.home ?? null;
+  const fullAway = row.score?.fulltime?.away ?? null;
+  return {
+    status: short,
+    score: {
+      fullTime: isFinished ? { home: fullHome, away: fullAway } : undefined,
+      regularTime: { home: regularHome, away: regularAway },
+    },
+  };
 }
 
 function readMatchScoreFromApi(apiMatch) {
   const fullTime = apiMatch.score?.fullTime;
   const regularTime = apiMatch.score?.regularTime;
-  const isFinished = apiMatch.status === "FINISHED" || apiMatch.status === "AWARDED";
+  const isFinished = ["FT", "AET", "PEN", "AWD", "WO"].includes(apiMatch.status);
 
   if (isFinished) {
     if (fullTime?.home != null && fullTime?.away != null) {
@@ -128,18 +141,22 @@ function resolveManualFinalScore(match) {
 async function fetchApiMatch(apiMatchId) {
   const apiKey = getApiKey();
   if (!apiKey) {
-    throw new Error("FOOTBALL_DATA_API_KEY در env تنظیم نشده است");
+    throw new Error("FIXTURE_API_KEY در env تنظیم نشده است");
   }
 
-  const res = await fetch(`https://api.football-data.org/v4/matches/${apiMatchId}`, {
-    headers: { "X-Auth-Token": apiKey },
+  const apiBase = process.env.FIXTURE_API_BASE_URL?.trim() || "https://v3.football.api-sports.io";
+  const res = await fetch(`${apiBase}/fixtures?id=${apiMatchId}`, {
+    headers: { "x-apisports-key": apiKey },
     signal: AbortSignal.timeout(15_000),
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    throw new Error(`football-data.org ${res.status}: ${body.slice(0, 200)}`);
+    throw new Error(`Fixture API ${res.status}: ${body.slice(0, 200)}`);
   }
-  return res.json();
+  const json = await res.json();
+  const row = json.response?.[0];
+  if (!row) throw new Error(`Fixture API: match ${apiMatchId} not found`);
+  return mapApiFixture(row);
 }
 
 async function resolveRewardMeta(prisma, prediction, accuracy) {

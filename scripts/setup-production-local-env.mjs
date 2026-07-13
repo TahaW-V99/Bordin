@@ -103,7 +103,7 @@ async function main() {
   }
 
   const publicUrl = `mysql://${username}:${encodeURIComponent(password)}@${host}:${port}/${database}`;
-  const footballKey = parseEnvFile(".env").FOOTBALL_DATA_API_KEY ?? parseEnvFile(".env.staging").FOOTBALL_DATA_API_KEY ?? "";
+  const fixtureKey = parseEnvFile(".env").FIXTURE_API_KEY ?? parseEnvFile(".env.staging").FIXTURE_API_KEY ?? "";
 
   const content = `# Auto-generated for local production tools (recover, grant-admin)
 # Public MySQL — Liara bordindb
@@ -111,7 +111,7 @@ async function main() {
 DATABASE_URL="${publicUrl}"
 DEV_MEMORY_DB=false
 NEXT_PUBLIC_APP_URL=https://bordin.ir
-FOOTBALL_DATA_API_KEY=${footballKey}
+FIXTURE_API_KEY=${fixtureKey}
 `;
 
   writeFileSync(".env.production.local", content, "utf8");

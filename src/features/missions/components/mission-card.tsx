@@ -5,7 +5,11 @@ import { Coins, HelpCircle, Lock, Trophy } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
 import { ClickTooltip } from "@/shared/components/ui/click-tooltip";
 import { formatPersianNumber } from "@/shared/lib/dates";
-import { INVITE_DEFAULT_COIN_REWARD, INVITE_DEFAULT_XP_REWARD } from "@/shared/constants/invite";
+import {
+  INVITE_DEFAULT_COIN_REWARD,
+  INVITE_DEFAULT_XP_REWARD,
+  isInviteUnlimitedRewardPromoActive,
+} from "@/shared/constants/invite";
 import { cn } from "@/shared/lib/cn";
 import type { MissionCardView } from "@/shared/types/missions";
 import { MissionGoldenProgressBar } from "@/features/missions/components/mission-golden-progress-bar";
@@ -62,7 +66,7 @@ export function MissionCard({
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <h2 className="text-base font-bold">{mission.titleFa}</h2>
-              {mission.slug === "davat" ? (
+              {mission.slug === "davat" && isInviteUnlimitedRewardPromoActive() ? (
                 <span className="rounded-full bg-[#f5b942]/15 px-2 py-0.5 text-[10px] font-semibold text-[#ffd54a]">
                   نامحدود تا ۱۵ تیر
                 </span>

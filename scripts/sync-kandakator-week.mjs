@@ -1,5 +1,5 @@
 /**
- * Sync Tehran week kandakator from football-data.org into MySQL.
+ * Sync Tehran week kandakator from Fixture API into MySQL.
  * Run on Liara (staging/production) where DATABASE_URL is reachable:
  *   liara shell -a bordintest -c "node scripts/sync-kandakator-week.mjs"
  *

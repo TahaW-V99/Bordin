@@ -6,7 +6,7 @@ import { PrismaClient, MatchStatus } from "@prisma/client";
 import { addDays, format } from "date-fns";
 import { toZonedTime } from "date-fns-tz";
 
-const API_BASE = "https://api.football-data.org/v4";
+const API_BASE = process.env.FIXTURE_API_BASE_URL?.trim() || "https://v3.football.api-sports.io";
 const TEHRAN = "Asia/Tehran";
 const prisma = new PrismaClient();
 
@@ -25,29 +25,35 @@ function getTehranWeekStart() {
   return addDays(today, -offset);
 }
 
-function mapStatus(status) {
-  if (status === "IN_PLAY" || status === "PAUSED") return MatchStatus.LIVE;
-  if (status === "FINISHED") return MatchStatus.FINISHED;
-  if (status === "POSTPONED" || status === "SUSPENDED") return MatchStatus.POSTPONED;
-  if (status === "CANCELLED") return MatchStatus.CANCELLED;
+function mapStatus(short) {
+  if (["1H", "2H", "HT", "ET", "BT", "LIVE", "P"].includes(short)) return MatchStatus.LIVE;
+  if (["FT", "AET", "PEN", "AWD", "WO"].includes(short)) return MatchStatus.FINISHED;
+  if (["PST", "SUSP", "INT", "TBD"].includes(short)) return MatchStatus.POSTPONED;
+  if (["CANC", "ABD"].includes(short)) return MatchStatus.CANCELLED;
   return MatchStatus.SCHEDULED;
 }
 
-function readScore(match) {
-  const ft = match.score?.fullTime ?? match.score?.regularTime;
-  return { homeScore: ft?.home ?? null, awayScore: ft?.away ?? null };
+function readScore(row) {
+  const short = row.fixture.status.short;
+  const isFinished = ["FT", "AET", "PEN", "AWD", "WO"].includes(short);
+  if (isFinished) {
+    const ft = row.score?.fulltime;
+    return { homeScore: ft?.home ?? null, awayScore: ft?.away ?? null };
+  }
+  return { homeScore: row.goals?.home ?? null, awayScore: row.goals?.away ?? null };
 }
 
 async function fetchMatchesByDate(dateKey) {
-  const apiKey = process.env.FOOTBALL_DATA_API_KEY?.trim();
-  if (!apiKey) throw new Error("FOOTBALL_DATA_API_KEY is not set");
+  const apiKey = process.env.FIXTURE_API_KEY?.trim();
+  if (!apiKey) throw new Error("FIXTURE_API_KEY is not set");
 
-  const url = new URL(`${API_BASE}/matches`);
+  const url = new URL(`${API_BASE}/fixtures`);
   url.searchParams.set("date", dateKey);
-  const res = await fetch(url, { headers: { "X-Auth-Token": apiKey } });
-  if (!res.ok) throw new Error(`football-data.org ${res.status}`);
+  url.searchParams.set("timezone", TEHRAN);
+  const res = await fetch(url, { headers: { "x-apisports-key": apiKey } });
+  if (!res.ok) throw new Error(`Fixture API ${res.status}`);
   const data = await res.json();
-  return data.matches ?? [];
+  return data.response ?? [];
 }
 
 async function syncDay(dateKey) {
@@ -56,7 +62,7 @@ async function syncDay(dateKey) {
 
   const dayStart = tehranDayStart(dateKey);
   const sorted = [...matches].sort(
-    (a, b) => new Date(a.utcDate).getTime() - new Date(b.utcDate).getTime(),
+    (a, b) => new Date(a.fixture.date).getTime() - new Date(b.fixture.date).getTime(),
   );
 
   await prisma.$transaction(async (tx) => {
@@ -72,28 +78,29 @@ async function syncDay(dateKey) {
     });
 
     for (let i = 0; i < sorted.length; i++) {
-      const m = sorted[i];
-      const { homeScore, awayScore } = readScore(m);
+      const row = sorted[i];
+      const { homeScore, awayScore } = readScore(row);
+      const externalId = `fixture-${row.fixture.id}`;
       const match = await tx.footballMatch.upsert({
-        where: { externalId: `football-data-${m.id}` },
+        where: { externalId },
         create: {
-          externalId: `football-data-${m.id}`,
-          homeTeamName: m.homeTeam.name,
-          awayTeamName: m.awayTeam.name,
-          leagueName: m.competition?.name ?? null,
-          kickoffAt: new Date(m.utcDate),
+          externalId,
+          homeTeamName: row.teams.home.name,
+          awayTeamName: row.teams.away.name,
+          leagueName: row.league?.name ?? null,
+          kickoffAt: new Date(row.fixture.date),
           homeScore,
           awayScore,
-          status: mapStatus(m.status),
+          status: mapStatus(row.fixture.status.short),
         },
         update: {
-          homeTeamName: m.homeTeam.name,
-          awayTeamName: m.awayTeam.name,
-          leagueName: m.competition?.name ?? null,
-          kickoffAt: new Date(m.utcDate),
+          homeTeamName: row.teams.home.name,
+          awayTeamName: row.teams.away.name,
+          leagueName: row.league?.name ?? null,
+          kickoffAt: new Date(row.fixture.date),
           homeScore,
           awayScore,
-          status: mapStatus(m.status),
+          status: mapStatus(row.fixture.status.short),
         },
       });
 

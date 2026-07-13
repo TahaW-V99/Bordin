@@ -4,14 +4,9 @@ import { prisma } from "@/shared/lib/prisma";
 import { kandakatorDateFromKey } from "@/shared/lib/dates";
 import { countStaleMatchesForDate } from "@/server/services/kandakator-reconciliation-service";
 import { enqueueKandakatorSyncDates } from "@/server/services/kandakator-sync-queue-service";
-import { getPersistedAppBaseUrl } from "@/server/services/kandakator-sync-service";
 
 const DEFAULT_WAIT_MS = 25_000;
 const POLL_INTERVAL_MS = 2_000;
-
-export function getCloudflareSyncUrl() {
-  return process.env.KANDAKATOR_CF_SYNC_URL?.trim() || "";
-}
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -26,53 +21,6 @@ async function hasStaleScoresForDates(dateKeys: string[]): Promise<boolean> {
   }
 
   return false;
-}
-
-export async function triggerQueuedRemoteSyncJob(input: {
-  jobId: string;
-  dateKey: string;
-  source: string;
-}) {
-  const url = getCloudflareSyncUrl();
-  const token = process.env.KANDAKATOR_SYNC_PUSH_TOKEN?.trim();
-  const targetBaseUrl = getPersistedAppBaseUrl();
-  if (!url || !token || !targetBaseUrl) {
-    throw new Error("queued_remote_sync_not_configured");
-  }
-
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      jobId: input.jobId,
-      date: input.dateKey,
-      targetBaseUrl,
-      source: input.source,
-    }),
-    signal: AbortSignal.timeout(60_000),
-  });
-
-  const json = (await res.json().catch(() => null)) as
-    | {
-        success?: boolean;
-        fetchedCount?: number;
-        matches?: Array<Record<string, unknown>>;
-        error?: string;
-      }
-    | null;
-
-  if (!res.ok || !json?.success) {
-    throw new Error(json?.error ?? `remote_job_failed:${res.status}`);
-  }
-
-  return {
-    fetchedCount: json.fetchedCount ?? 0,
-    matches: (json.matches ?? []) as never[],
-    synced: { date: input.dateKey, matchCount: json.fetchedCount ?? 0, kandakatorId: null },
-  };
 }
 
 async function hasMissingKandakatorForDates(dateKeys: string[]): Promise<boolean> {
@@ -105,8 +53,7 @@ export type StaleScoreRefreshResult = {
 };
 
 /**
- * Trigger remote sync and optionally wait until DB stale count decreases.
- * Root-cause fix: production previously fired CF worker and returned stale DB immediately.
+ * Enqueue sync jobs and optionally wait until DB stale count decreases.
  */
 export async function awaitStaleScoreRefreshForDates(
   dateKeys: string[],
@@ -131,7 +78,6 @@ export async function awaitStaleScoreRefreshForDates(
 
   await enqueueKandakatorSyncDates(unique, "stale-read");
 
-  // Reads should enqueue and return; queue processor owns retries and write verification.
   if (!options?.waitForUpdate) {
     return {
       refreshed: false,

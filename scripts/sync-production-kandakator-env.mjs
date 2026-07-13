@@ -9,7 +9,6 @@ import { existsSync, readFileSync } from "node:fs";
 
 const STAGING_ENV_FILE = ".env.staging";
 const PRODUCTION_APP = "bordin";
-const CF_SYNC_URL = "https://bordin-kandakator-sync.bordinir.workers.dev";
 
 function parseEnvFile(content) {
   const env = {};
@@ -38,19 +37,18 @@ if (!existsSync(STAGING_ENV_FILE)) {
 
 const staging = parseEnvFile(readFileSync(STAGING_ENV_FILE, "utf8"));
 const pushToken = staging.KANDAKATOR_SYNC_PUSH_TOKEN?.trim();
-const apiKey = staging.FOOTBALL_DATA_API_KEY?.trim();
+const apiKey = staging.FIXTURE_API_KEY?.trim();
 
 if (!pushToken || !apiKey) {
-  console.error("KANDAKATOR_SYNC_PUSH_TOKEN and FOOTBALL_DATA_API_KEY required in .env.staging");
+  console.error("KANDAKATOR_SYNC_PUSH_TOKEN and FIXTURE_API_KEY required in .env.staging");
   process.exit(1);
 }
 
 const pairs = [
   `KANDAKATOR_SYNC_PUSH_TOKEN=${pushToken}`,
-  `FOOTBALL_DATA_API_KEY=${apiKey}`,
-  "KANDAKATOR_RUNTIME_SYNC=false",
-  "FOOTBALL_DATA_FETCH_TIMEOUT_MS=15000",
-  `KANDAKATOR_CF_SYNC_URL=${CF_SYNC_URL}`,
+  `FIXTURE_API_KEY=${apiKey}`,
+  "KANDAKATOR_RUNTIME_SYNC=true",
+  "FIXTURE_API_FETCH_TIMEOUT_MS=15000",
 ];
 
 console.log(`Setting kandakator env on Liara app "${PRODUCTION_APP}"...`);

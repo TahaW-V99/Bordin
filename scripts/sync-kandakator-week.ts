@@ -34,7 +34,7 @@ const isStaging = process.argv.includes("--staging");
 if (isStaging) {
   const merged = mergeEnvFiles([".env.staging", ".env.staging.local"]);
   process.env.DEV_MEMORY_DB = "false";
-  process.env.FOOTBALL_DATA_FETCH_TIMEOUT_MS ??= "30000";
+  process.env.FIXTURE_API_FETCH_TIMEOUT_MS ??= "30000";
   for (const [key, value] of Object.entries(merged)) {
     process.env[key] = value;
   }
@@ -44,10 +44,10 @@ if (isStaging) {
 async function main() {
   const { syncTehranWeekFromApi } = await import("@/server/services/kandakator-sync-service");
   const { settleAllFinishedMatches } = await import("@/server/services/settlement-service");
-  const { isFootballDataConfigured } = await import("@/server/services/football-data-api");
+  const { isFixtureApiConfigured } = await import("@/server/services/fixture-api");
 
-  if (!isFootballDataConfigured()) {
-    console.error("FOOTBALL_DATA_API_KEY is not set.");
+  if (!isFixtureApiConfigured()) {
+    console.error("FIXTURE_API_KEY is not set.");
     process.exit(1);
   }
 

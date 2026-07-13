@@ -74,7 +74,6 @@ export function loadRecoverKandakatorEnv(options: RecoverKandakatorOptions) {
   return {
     baseUrl,
     token: process.env.KANDAKATOR_SYNC_PUSH_TOKEN?.trim(),
-    cfWorkerUrl: process.env.KANDAKATOR_CF_SYNC_URL?.trim(),
     canUseLocalDb,
     allowHttpPush,
     onServer,
@@ -113,41 +112,10 @@ async function pushDateViaHttp(
   return json as { result?: { matchCount?: number } };
 }
 
-async function triggerCfWorker(
-  cfWorkerUrl: string,
-  token: string,
-  baseUrl: string,
-  dateKey: string,
-  jobId: string,
-) {
-  const res = await fetch(cfWorkerUrl, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      jobId,
-      date: dateKey,
-      targetBaseUrl: baseUrl,
-      source: "recover-cli",
-    }),
-    signal: AbortSignal.timeout(90_000),
-  });
-
-  const json = (await res.json().catch(() => null)) as { success?: boolean; fetchedCount?: number } | null;
-  if (!res.ok || !json?.success) {
-    console.warn(`[recover-kandakator] CF worker failed for ${dateKey}:`, res.status, json);
-    return false;
-  }
-
-  console.info(`[recover-kandakator] CF worker synced ${dateKey}: ${json.fetchedCount ?? 0} matches`);
-  return true;
-}
 
 export async function runRecoverKandakator(options: RecoverKandakatorOptions) {
   const days = options.days ?? 10;
-  const { baseUrl, token, cfWorkerUrl, canUseLocalDb, allowHttpPush, onServer } =
+  const { baseUrl, token, canUseLocalDb, allowHttpPush, onServer } =
     loadRecoverKandakatorEnv(options);
 
   if (!token && allowHttpPush) {
@@ -160,16 +128,16 @@ export async function runRecoverKandakator(options: RecoverKandakatorOptions) {
     );
   }
 
-  const { isFootballDataConfigured, fetchMatchesForTehranDate } = await import(
-    "@/server/services/football-data-api"
+  const { isFixtureApiConfigured, fetchMatchesForTehranDate } = await import(
+    "@/server/services/fixture-api"
   );
   const { getRecentTehranDateKeys } = await import("@/server/services/kandakator-display-ingest");
   const { syncDailyKandakatorFromFootballMatches } = await import(
     "@/server/services/kandakator-sync-service"
   );
 
-  if (!isFootballDataConfigured()) {
-    throw new Error("FOOTBALL_DATA_API_KEY is not set.");
+  if (!isFixtureApiConfigured()) {
+    throw new Error("FIXTURE_API_KEY is not set.");
   }
 
   const dateKeys = getRecentTehranDateKeys(days);
@@ -201,32 +169,13 @@ export async function runRecoverKandakator(options: RecoverKandakatorOptions) {
         const pushed = await pushDateViaHttp(baseUrl, token, dateKey, matches);
         matchCount = pushed.result?.matchCount ?? matches.length;
         method = "http-push";
-      } else if (cfWorkerUrl && token) {
-        const ok = await triggerCfWorker(cfWorkerUrl, token, baseUrl, dateKey, `recover-${dateKey}`);
-        method = ok ? "cf-worker" : "cf-worker-failed";
       } else {
-        method = "no-matches";
-      }
-
-      if (matchCount === 0 && cfWorkerUrl && token && method !== "cf-worker") {
-        await triggerCfWorker(cfWorkerUrl, token, baseUrl, dateKey, `recover-${dateKey}`);
+        method = matches.length === 0 ? "no-matches" : "skipped";
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error(`\n[recover-kandakator] error on ${dateKey}: ${message}`);
-
-      if (cfWorkerUrl && token) {
-        const ok = await triggerCfWorker(
-          cfWorkerUrl,
-          token,
-          baseUrl,
-          dateKey,
-          `recover-fallback-${dateKey}`,
-        );
-        method = ok ? "cf-worker-fallback" : "failed";
-      } else {
-        method = "failed";
-      }
+      method = "failed";
     }
 
     totalMatches += matchCount;
@@ -241,12 +190,12 @@ export async function runRecoverKandakator(options: RecoverKandakatorOptions) {
     console.info(`  ${row.dateKey}: ${row.matchCount} (${row.method})`);
   }
 
-  const emptyDays = results.filter((r) => r.matchCount === 0 && !r.method.includes("cf-worker"));
+  const emptyDays = results.filter((r) => r.matchCount === 0);
   if (emptyDays.length > 0) {
     const hint =
       options.target === "production"
-        ? "Check FOOTBALL_DATA_API_KEY or .env.production.local DATABASE_URL"
-        : "Check FOOTBALL_DATA_API_KEY or public DATABASE_URL in .env.staging.local";
+        ? "Check FIXTURE_API_KEY or .env.production.local DATABASE_URL"
+        : "Check FIXTURE_API_KEY or public DATABASE_URL in .env.staging.local";
     console.warn(`\n[recover-kandakator] ${emptyDays.length} day(s) still empty. ${hint}`);
     process.exitCode = 1;
   }

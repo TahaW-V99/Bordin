@@ -6,8 +6,8 @@
 
 | Root cause | Why it recurs |
 |------------|---------------|
-| Classification depends on `football_matches.homeScore/awayScore` in DB | Scores only arrive via external sync (CF Worker / GitHub Actions) |
-| `ensureRecentPredictionsScored` triggered remote sync but **did not wait** for DB update | Same request returned stale data; user saw old tab |
+| Classification depends on `football_matches.homeScore/awayScore` in DB | Scores only arrive via Fixture API sync |
+| `ensureRecentPredictionsScored` triggered sync but **did not wait** for DB update | Same request returned stale data; user saw old tab |
 | Settlement loop used **stale prediction list** fetched before sync | New scores not settled in same request |
 | No persisted reconciliation | Deploy/restart cleared in-memory cooldowns; sync gaps lasted until manual refresh |
 
@@ -15,7 +15,7 @@
 
 | Root cause | Why it recurs |
 |------------|---------------|
-| `getKandakatorForDate` returned DB state immediately after fire-and-forget CF trigger | UI showed "در حال بروزرسانی" indefinitely |
+| `getKandakatorForDate` returned DB state immediately after fire-and-forget sync | UI showed stale scores |
 | No frontend polling | Page held stale React state for 20+ minutes |
 | `prepareKandakatorForDisplay` existed but was **never called** | Intended pre-display sync never ran |
 | Scores require **both** `homeScore` and `awayScore` non-null | Partial API data silently stored as null |
@@ -24,11 +24,10 @@
 
 | Root cause | Why it recurs |
 |------------|---------------|
-| **No Liara cron** — only external CF Worker + GitHub Actions | If secrets drift or scheduler fails, Liara has no fallback |
-| CF Worker returns HTTP 200 before sync completes (`ctx.waitUntil`) | Failures invisible to app |
-| CF syncs only ~4 days per 20-min run | Mid-week days lag |
+| Queue processor not running on schedule | Jobs pile up without tick/reconcile |
 | No persisted `lastSync` timestamp | No way to detect silent failure |
-| `KANDAKATOR_SYNC_PUSH_TOKEN` must match across CF, GH, Liara | Token rotation stops all pushes |
+| `KANDAKATOR_SYNC_PUSH_TOKEN` must match across GitHub and Liara | Token rotation stops enqueue pushes |
+| `FIXTURE_API_KEY` missing or `KANDAKATOR_RUNTIME_SYNC=false` | Server cannot fetch fixtures directly |
 
 ## Permanent solution
 
@@ -49,13 +48,13 @@
 - Detects stale matches (kickoff passed, no scores)
 - Detects unsettled predictions (scores known, `scoredAt` null)
 - Detects orphan/partial score states
-- Triggers remote sync **with DB polling** (up to 25s)
+- Enqueues sync jobs and polls DB (up to 25s when requested)
 - Runs `settleAllFinishedMatches()`
 - Records health metrics
 
 ### Read-path fixes
 
-- `getKandakatorForDate`: calls `prepareKandakatorForDisplay` + `awaitKandakatorScoreRefresh({ waitForUpdate: true })`
+- `getKandakatorForDate`: calls `prepareKandakatorForDisplay` + queue processing
 - `ensureRecentPredictionsScored`: waits for sync, **re-fetches** unscored predictions
 - Home dashboard: polls every 30s when matches need scores
 
@@ -63,10 +62,10 @@
 
 | Job | Interval | Location | Role |
 |-----|----------|----------|------|
-| CF Worker cron | 20 min | `workers/kandakator-sync` | Fetch API → push to Liara |
-| GitHub Actions | 20 min | `.github/workflows/kandakator-sync.yml` | Full week push |
+| GitHub Actions | 20 min | `.github/workflows/kandakator-sync.yml` | Enqueue week sync on app |
+| Queue processor | on tick/reconcile | `kandakator-sync-queue-processor.ts` | Fetch Fixture API → write DB |
 | Prediction settlement | 5 min | `prediction-settlement-scheduler.ts` | Score predictions when DB has results |
-| **Reconciliation** | 5 min | `kandakator-reconciliation-scheduler.ts` | Detect orphans, trigger sync, settle |
+| **Reconciliation** | 5 min | `kandakator-reconciliation-scheduler.ts` | Detect orphans, enqueue sync, settle |
 | Team competition | 5 min | `team-competition-scheduler.ts` | Team comp engine |
 
 ## Database fields
@@ -94,5 +93,6 @@ curl -H "Authorization: Bearer $KANDAKATOR_SYNC_PUSH_TOKEN" \
 1. Never classify predictions from frontend state — API uses lifecycle helpers
 2. Never return kandakator data without attempting score refresh with wait
 3. Monitor `/api/internal/kandakator/health` for `staleMatchCount > 0`
-4. Keep `KANDAKATOR_SYNC_PUSH_TOKEN` identical on CF, GitHub, Liara
-5. After deploy: `npm run db:push` then verify health endpoint
+4. Keep `KANDAKATOR_SYNC_PUSH_TOKEN` identical on GitHub and Liara
+5. Set `FIXTURE_API_KEY` and `KANDAKATOR_RUNTIME_SYNC=true` on staging/production
+6. After deploy: `npm run db:push` then verify health endpoint

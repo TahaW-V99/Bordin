@@ -97,7 +97,7 @@ const TEAM_NAMES_FA: Record<string, string> = {
   Porto: "پورتو",
 };
 
-/** تیم‌های ملی — نام‌های رایج در football-data.org */
+/** تیم‌های ملی — نام‌های رایج در API مسابقات */
 const NATIONAL_TEAM_NAMES_FA: Record<string, string> = {
   Iran: "ایران",
   "IR Iran": "ایران",

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { CalendarDays } from "lucide-react";
 import { PageHeader } from "@/shared/components/layout/page-header";
 import { Skeleton } from "@/shared/components/ui/skeleton";
@@ -28,6 +29,16 @@ type KandakatorDto = {
     predictionCutoffMinutes: number;
     entryFeeCoins?: number;
     teamCompetitionBadges?: Array<{ id: string; titleFa: string; label: string }>;
+    watchParty?: {
+      roomId: string;
+      matchId: string;
+      capacity: number;
+      entryFeeCoins: number;
+      occupiedCount: number;
+      hasJoined: boolean;
+      uiPhase: "upcoming" | "active";
+      googleMeetUrl: string | null;
+    } | null;
     match: {
       id: string;
       homeTeamName: string;
@@ -49,6 +60,8 @@ type KandakatorDto = {
 };
 
 export function HomeDashboard() {
+  const searchParams = useSearchParams();
+  const pendingWatchPartyMatchId = searchParams.get("watchParty");
   const [weekDays, setWeekDays] = useState<WeekDayItem[]>([]);
   const [selectedDate, setSelectedDate] = useState("");
   const [kandakator, setKandakator] = useState<KandakatorDto | null>(null);
@@ -65,6 +78,13 @@ export function HomeDashboard() {
   const [loading, setLoading] = useState(true);
   const [kandakatorLoading, setKandakatorLoading] = useState(false);
   const [nameModalOpen, setNameModalOpen] = useState(false);
+  const [autoOpenWatchPartyMatchId, setAutoOpenWatchPartyMatchId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (pendingWatchPartyMatchId) {
+      setAutoOpenWatchPartyMatchId(pendingWatchPartyMatchId);
+    }
+  }, [pendingWatchPartyMatchId]);
 
   const loadKandakator = useCallback(async (date: string) => {
     setKandakatorLoading(true);
@@ -202,6 +222,8 @@ export function HomeDashboard() {
                         void load();
                       }
                     }}
+                    autoOpenWatchPartyMatchId={autoOpenWatchPartyMatchId}
+                    onWatchPartyAutoOpened={() => setAutoOpenWatchPartyMatchId(null)}
                     defaultOpen={index === 0}
                   />
                 ))}

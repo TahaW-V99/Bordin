@@ -145,7 +145,7 @@ async function main() {
       date: dateKey,
       matches: [
         {
-          id: Number.parseInt(km!.matchId.replace("football-data-", ""), 10) || 999001,
+          id: Number.parseInt(km!.matchId.split("-").pop() ?? "", 10) || 999001,
           utcDate: km!.match.kickoffAt,
           status: "FINISHED",
           homeTeam: { id: 1, name: km!.match.homeTeamName },

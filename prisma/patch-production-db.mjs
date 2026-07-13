@@ -57,6 +57,67 @@ const statements = [
     createdAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     PRIMARY KEY (filename)
   )`,
+  `ALTER TABLE users ADD COLUMN lastSeenAt DATETIME(3) NULL`,
+  `ALTER TABLE coin_transactions MODIFY COLUMN type ENUM(
+    'SIGNUP_BONUS','PREDICTION_ENTRY','PREDICTION_REWARD','CUP_ENTRY','CUP_REWARD',
+    'TOURNAMENT_ENTRY','TOURNAMENT_PREDICTION','TOURNAMENT_REWARD','TEAM_COMPETITION_ENTRY',
+    'TEAM_COMPETITION_REWARD','TEAM_LOGO_PURCHASE','TEAM_FORMATION_FEE','TEAM_JOIN_FEE',
+    'TEAM_RENAME_FEE','TEAM_REMOVE_MEMBER_FEE','TEAM_EXTRA_INVITE_FEE','TEAM_LEAVE_FEE',
+    'WHEEL_REWARD','WHEEL_SPIN_COST','INVITE_REWARD','LEVEL_UP_REWARD','MISSION_REWARD',
+    'PURCHASE','SELL','WITHDRAWAL','ADMIN_ADJUSTMENT','PROFILE_NAME_CHANGE',
+    'PROFILE_AVATAR_PURCHASE','WATCH_PARTY_ENTRY'
+  ) NOT NULL`,
+  `ALTER TABLE notifications MODIFY COLUMN type ENUM(
+    'REWARD','LEVEL_UP','MEDAL','COMPETITION','SYSTEM','INVITE','DISCOUNT',
+    'PREDICTION_SETTLED','LEADERBOARD_RANK_UP','TEAM_LEADERBOARD_RANK_UP',
+    'TEAM_INVITE','TEAM_MEMBER_LEFT','WATCH_PARTY_INVITE'
+  ) NOT NULL`,
+  `CREATE TABLE IF NOT EXISTS watch_party_rooms (
+    id VARCHAR(191) NOT NULL,
+    matchId VARCHAR(191) NOT NULL,
+    googleMeetUrl TEXT NOT NULL,
+    capacity INT NOT NULL,
+    entryFeeCoins INT NOT NULL,
+    isPublished TINYINT(1) NOT NULL DEFAULT 0,
+    publishedAt DATETIME(3) NULL,
+    createdById VARCHAR(191) NULL,
+    createdAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updatedAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    PRIMARY KEY (id),
+    UNIQUE KEY watch_party_rooms_matchId_key (matchId),
+    KEY watch_party_rooms_isPublished_idx (isPublished),
+    CONSTRAINT watch_party_rooms_matchId_fkey FOREIGN KEY (matchId) REFERENCES football_matches(id) ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT watch_party_rooms_createdById_fkey FOREIGN KEY (createdById) REFERENCES users(id) ON DELETE SET NULL ON UPDATE CASCADE
+  )`,
+  `CREATE TABLE IF NOT EXISTS watch_party_entries (
+    id VARCHAR(191) NOT NULL,
+    roomId VARCHAR(191) NOT NULL,
+    userId VARCHAR(191) NOT NULL,
+    paidCoins INT NOT NULL,
+    joinedAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    PRIMARY KEY (id),
+    UNIQUE KEY watch_party_entries_roomId_userId_key (roomId, userId),
+    KEY watch_party_entries_roomId_idx (roomId),
+    KEY watch_party_entries_userId_idx (userId),
+    CONSTRAINT watch_party_entries_roomId_fkey FOREIGN KEY (roomId) REFERENCES watch_party_rooms(id) ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT watch_party_entries_userId_fkey FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE
+  )`,
+  `CREATE TABLE IF NOT EXISTS watch_party_invites (
+    id VARCHAR(191) NOT NULL,
+    roomId VARCHAR(191) NOT NULL,
+    inviterId VARCHAR(191) NOT NULL,
+    inviteeId VARCHAR(191) NOT NULL,
+    pushSentAt DATETIME(3) NULL,
+    smsSentAt DATETIME(3) NULL,
+    dismissedAt DATETIME(3) NULL,
+    createdAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    PRIMARY KEY (id),
+    UNIQUE KEY watch_party_invites_roomId_inviterId_inviteeId_key (roomId, inviterId, inviteeId),
+    KEY watch_party_invites_inviteeId_dismissedAt_idx (inviteeId, dismissedAt),
+    CONSTRAINT watch_party_invites_roomId_fkey FOREIGN KEY (roomId) REFERENCES watch_party_rooms(id) ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT watch_party_invites_inviterId_fkey FOREIGN KEY (inviterId) REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT watch_party_invites_inviteeId_fkey FOREIGN KEY (inviteeId) REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE
+  )`,
 ];
 
 async function main() {

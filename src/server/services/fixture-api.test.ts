@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { readMatchScore } from "./football-data-api";
+import { readMatchScore } from "./fixture-api";
 
 describe("readMatchScore", () => {
   it("uses fullTime only when match is FINISHED", () => {
     const score = readMatchScore({
       id: 1,
       utcDate: "2026-07-01T00:00:00Z",
-      status: "FINISHED",
+      status: "FT",
       homeTeam: { id: 1, name: "USA" },
       awayTeam: { id: 2, name: "BIH" },
       score: {
@@ -21,7 +21,7 @@ describe("readMatchScore", () => {
     const score = readMatchScore({
       id: 1,
       utcDate: "2026-07-01T00:00:00Z",
-      status: "FINISHED",
+      status: "FT",
       homeTeam: { id: 1, name: "USA" },
       awayTeam: { id: 2, name: "BIH" },
       score: {
@@ -35,7 +35,7 @@ describe("readMatchScore", () => {
     const score = readMatchScore({
       id: 1,
       utcDate: "2026-07-01T00:00:00Z",
-      status: "PAUSED",
+      status: "HT",
       homeTeam: { id: 1, name: "USA" },
       awayTeam: { id: 2, name: "BIH" },
       score: {

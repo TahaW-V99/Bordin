@@ -11,15 +11,19 @@ import { Skeleton } from "@/shared/components/ui/skeleton";
 import { AdminWalletPanel } from "@/features/admin/components/admin-wallet-panel";
 import { AdminCompetitionsPanel } from "@/features/admin/components/admin-competitions-panel";
 import { AdminChatReportsPanel } from "@/features/admin/components/admin-chat-reports-panel";
+import { AdminWatchPartyPanel } from "@/features/admin/components/admin-watch-party-panel";
 
-type AdminTab = "general" | "competitions" | "wallet" | "chat-reports";
+type AdminTab = "general" | "competitions" | "wallet" | "chat-reports" | "watch-party";
 
 export function AdminDashboard() {
   const { toast } = useToast();
   const searchParams = useSearchParams();
   const initialTab = searchParams.get("tab");
   const [tab, setTab] = useState<AdminTab>(
-    initialTab === "competitions" || initialTab === "wallet" || initialTab === "chat-reports"
+    initialTab === "competitions" ||
+    initialTab === "wallet" ||
+    initialTab === "chat-reports" ||
+    initialTab === "watch-party"
       ? initialTab
       : "general",
   );
@@ -28,7 +32,12 @@ export function AdminDashboard() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (initialTab === "competitions" || initialTab === "wallet" || initialTab === "chat-reports") {
+    if (
+      initialTab === "competitions" ||
+      initialTab === "wallet" ||
+      initialTab === "chat-reports" ||
+      initialTab === "watch-party"
+    ) {
       setTab(initialTab);
     }
   }, [initialTab]);
@@ -74,7 +83,12 @@ export function AdminDashboard() {
           <Chip active={tab === "chat-reports"} onClick={() => setTab("chat-reports")}>
             گزارش پیام
           </Chip>
+          <Chip active={tab === "watch-party"} onClick={() => setTab("watch-party")}>
+            watch party
+          </Chip>
         </div>
+
+        {tab === "watch-party" ? <AdminWatchPartyPanel /> : null}
 
         {tab === "chat-reports" ? (
           <section>
@@ -113,9 +127,9 @@ export function AdminDashboard() {
             )}
 
             <section>
-              <h3 className="mb-3 font-bold">همگام‌سازی کنداکتور (football-data.org)</h3>
+              <h3 className="mb-3 font-bold">همگام‌سازی کنداکتور</h3>
               <p className="mb-3 text-xs text-white/45">
-                نیاز به FOOTBALL_DATA_API_KEY در env دارد. کلید از football-data.org
+                نیاز به FIXTURE_API_KEY در env دارد.
               </p>
               <div className="flex flex-wrap gap-2">
                 <Button

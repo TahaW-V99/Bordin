@@ -1,8 +1,7 @@
-import { addDays, addMinutes } from "date-fns";
+import { addMinutes } from "date-fns";
 import { SyncJobStatus } from "@prisma/client";
 import { shouldUseMemoryDb } from "@/server/db";
 import { prisma } from "@/shared/lib/prisma";
-import { kandakatorDateFromKey } from "@/shared/lib/dates";
 import { getKandakatorSyncHealth } from "@/server/services/kandakator-sync-health";
 import { getKandakatorSyncQueueStats } from "@/server/services/kandakator-sync-queue-service";
 import {
@@ -10,7 +9,7 @@ import {
   getRecentTehranDateKeys,
   hasPublishedKandakatorForDate,
 } from "@/server/services/kandakator-display-ingest";
-import { getCloudflareSyncUrl } from "@/server/services/kandakator-remote-sync-service";
+import { isFixtureApiConfigured } from "@/server/services/fixture-api";
 
 export type KandakatorSystemAudit = {
   systemStatus: "HEALTHY" | "DEGRADED" | "BROKEN";
@@ -31,9 +30,9 @@ export type KandakatorSystemAudit = {
     stuckProcessing: number;
     oldestPendingMinutes: number | null;
   };
-  workerLayer: {
-    status: "RUNNING" | "NOT_RUNNING" | "PARTIAL";
-    cloudflareWorkerConfigured: boolean;
+  fixtureApiLayer: {
+    status: "CONFIGURED" | "NOT_CONFIGURED";
+    fixtureApiConfigured: boolean;
     recentFailures: Array<{ dateKey: string; error: string; at: string }>;
   };
   ingestionLayer: {
@@ -61,7 +60,7 @@ export async function runKandakatorSystemAudit(): Promise<KandakatorSystemAudit>
         stuckProcessing: 0,
         oldestPendingMinutes: null,
       },
-      workerLayer: { status: "NOT_RUNNING", cloudflareWorkerConfigured: false, recentFailures: [] },
+      fixtureApiLayer: { status: "NOT_CONFIGURED", fixtureApiConfigured: false, recentFailures: [] },
       ingestionLayer: { status: "UNKNOWN", lastSuccessfulSyncAt: null, lastFailedSyncAt: null },
       legacyArtifacts: { present: false, evidence: [] },
       rootCause: "Running against in-memory database",
@@ -121,12 +120,11 @@ export async function runKandakatorSystemAudit(): Promise<KandakatorSystemAudit>
   }
 
   const health = await getKandakatorSyncHealth();
-  const cloudflareWorkerConfigured = Boolean(getCloudflareSyncUrl());
+  const fixtureApiConfigured = isFixtureApiConfigured();
 
-  let workerStatus: "RUNNING" | "NOT_RUNNING" | "PARTIAL" = "PARTIAL";
-  if (!cloudflareWorkerConfigured) workerStatus = "NOT_RUNNING";
-  else if (completedLastHour > 0) workerStatus = "RUNNING";
-  else if (queueStats.failed + queueStats.deadLetter > 0) workerStatus = "NOT_RUNNING";
+  const fixtureApiStatus: "CONFIGURED" | "NOT_CONFIGURED" = fixtureApiConfigured
+    ? "CONFIGURED"
+    : "NOT_CONFIGURED";
 
   let ingestionStatus: "SUCCESS" | "FAILING" | "UNKNOWN" = "UNKNOWN";
   if (health.lastSuccess && (!health.lastFailure || health.lastSuccess.createdAt > health.lastFailure.createdAt)) {
@@ -136,8 +134,8 @@ export async function runKandakatorSystemAudit(): Promise<KandakatorSystemAudit>
   }
 
   const legacyEvidence: string[] = [];
-  if (health.lastFailure?.errorMessage?.includes("remote sync wait timeout")) {
-    legacyEvidence.push("remote sync wait timeout in last failure");
+  if (health.lastFailure?.errorMessage?.includes("fixture_api_not_configured")) {
+    legacyEvidence.push("fixture API not configured in last failure");
   }
   if (health.lastFailure?.errorMessage?.includes("fetch_failed")) {
     legacyEvidence.push("fetch_failed in last failure");
@@ -159,12 +157,12 @@ export async function runKandakatorSystemAudit(): Promise<KandakatorSystemAudit>
   let recommendedFix: string | undefined;
 
   if (dataStatus === "EMPTY" || missingRecords >= 3) {
-    if (!cloudflareWorkerConfigured) {
-      rootCause = "KANDAKATOR_CF_SYNC_URL not configured — production cannot fetch football-data";
-      recommendedFix = "Set KANDAKATOR_CF_SYNC_URL + deploy CF worker, then POST /api/internal/kandakator/recover";
-    } else if (queueStats.deadLetter > 0 || recentFailedJobs.some((j) => j.lastError?.includes("remote_worker"))) {
-      rootCause = "Queue jobs failing against Cloudflare worker";
-      recommendedFix = "Run npm run cf:worker:deploy and POST /api/internal/kandakator/recover";
+    if (!fixtureApiConfigured) {
+      rootCause = "FIXTURE_API_KEY not configured — server cannot fetch fixtures";
+      recommendedFix = "Set FIXTURE_API_KEY and KANDAKATOR_RUNTIME_SYNC=true, then POST /api/internal/kandakator/recover";
+    } else if (queueStats.deadLetter > 0 || recentFailedJobs.some((j) => j.lastError?.includes("fixture_api"))) {
+      rootCause = "Queue jobs failing against Fixture API";
+      recommendedFix = "Verify FIXTURE_API_KEY and call POST /api/internal/kandakator/recover";
     } else if (completedLastHour === 0) {
       rootCause = "Queue scheduler not processing jobs (instrumentation or stuck queue)";
       recommendedFix = "Redeploy app and call /api/internal/kandakator/recover with process=true";
@@ -192,9 +190,9 @@ export async function runKandakatorSystemAudit(): Promise<KandakatorSystemAudit>
         ? Math.round((Date.now() - oldestPending.createdAt.getTime()) / 60_000)
         : null,
     },
-    workerLayer: {
-      status: workerStatus,
-      cloudflareWorkerConfigured,
+    fixtureApiLayer: {
+      status: fixtureApiStatus,
+      fixtureApiConfigured,
       recentFailures: recentFailedJobs.map((job) => ({
         dateKey: job.dateKey,
         error: job.lastError ?? "unknown",

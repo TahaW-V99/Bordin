@@ -12,6 +12,7 @@ import { getPredictionDeadlineInstant, effectivePredictionCutoffMinutes } from "
 import { resolveDailyPredictionEntryFee } from "@/server/services/team-competition-prediction-fee-service";
 import { blockNonCaptainKnockoutDailySubmit } from "@/server/services/team-competition-knockout-prediction-service";
 import { DisplayNameRequiredError } from "@/server/services/prediction-errors";
+import { parseFixtureExternalId } from "@/server/services/fixture-api";
 
 export { DisplayNameRequiredError } from "@/server/services/prediction-errors";
 
@@ -65,7 +66,7 @@ export async function submitDailyPrediction(
         id: matchId,
         kickoffAt: km.match.kickoffAt,
         leagueName: km.match.leagueName,
-        externalId: km.matchId.startsWith("football-data-") ? km.matchId : null,
+        externalId: parseFixtureExternalId(km.matchId) ? km.matchId : null,
       },
       defaultFee,
     );

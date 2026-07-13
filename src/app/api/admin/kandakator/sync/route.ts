@@ -47,7 +47,7 @@ export async function GET() {
 
     return NextResponse.json({
       configured: true,
-      provider: "queue-based football-data sync",
+      provider: "queue-based fixture API sync",
       endpoint: "External API -> Queue -> Worker -> DB -> Verification",
       dashboard: "Admin enqueue only; ingestion happens in queue processor",
     });

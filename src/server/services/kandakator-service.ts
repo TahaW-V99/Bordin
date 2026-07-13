@@ -26,13 +26,18 @@ import {
   settleMatchPredictions,
 } from "@/server/services/settlement-service";
 import {
+  buildFixtureExternalId,
   fetchMatchesForTehranDate,
-  isFootballDataConfigured,
-  mapFootballDataStatus,
+  isFixtureApiConfigured,
+  mapFixtureStatus,
   readMatchScore,
-} from "@/server/services/football-data-api";
+} from "@/server/services/fixture-api";
 import { translateMatchTeamsToFa } from "@/shared/lib/football-names-fa";
 import { getKnockoutPredictionUiState } from "@/server/services/team-competition-knockout-prediction-service";
+import {
+  getWatchPartyMapForMatchIds,
+  type WatchPartyPublicDto,
+} from "@/server/services/watch-party-service";
 
 export type KnockoutPredictionUiState = {
   role: "captain" | "member";
@@ -48,6 +53,7 @@ export type KandakatorMatchDto = {
   entryFeeCoins: number;
   teamCompetitionBadges?: TeamCompetitionKandakatorBadge[];
   knockoutUiState?: KnockoutPredictionUiState | null;
+  watchParty?: WatchPartyPublicDto | null;
   match: {
     id: string;
     homeTeamName: string;
@@ -160,7 +166,7 @@ async function hydrateMemoryKandakatorFromApi(dateKey: string, options?: { noCac
   );
 
   const apiItems = sorted.map((match) => {
-    const matchId = `football-data-${match.id}`;
+    const matchId = buildFixtureExternalId(match.id);
     const { homeScore, awayScore } = readMatchScore(match);
     const existing = devMemoryDb.kandakator.findMatchById(matchId);
     return translateMatchTeamsToFa({
@@ -171,7 +177,7 @@ async function hydrateMemoryKandakatorFromApi(dateKey: string, options?: { noCac
       kickoffAt: new Date(match.utcDate),
       homeScore: homeScore ?? existing?.homeScore ?? null,
       awayScore: awayScore ?? existing?.awayScore ?? null,
-      status: mapFootballDataStatus(match.status),
+      status: mapFixtureStatus(match.status),
     });
   });
 
@@ -192,7 +198,7 @@ export async function refreshKandakatorScoresForDates(dateKeys: string[]) {
   if (unique.length === 0) return;
 
   if (await shouldUseMemoryDb()) {
-    if (!isFootballDataConfigured()) return;
+    if (!isFixtureApiConfigured()) return;
     for (const dateKey of unique) {
       try {
         await hydrateMemoryKandakatorFromApi(dateKey, { noCache: true });
@@ -295,6 +301,8 @@ async function buildKandakatorDto(
     }),
   );
 
+  const watchPartyByMatchId = await getWatchPartyMapForMatchIds(userId, matchIds);
+
   return {
     id: kandakator.id,
     title: kandakator.title,
@@ -309,6 +317,7 @@ async function buildKandakatorDto(
       entryFeeCoins: feeByMatchId.get(km.match.id) ?? defaultFee,
       teamCompetitionBadges: badgeByMatchId.get(km.match.id) ?? [],
       knockoutUiState: knockoutUiByMatchId.get(km.matchId) ?? null,
+      watchParty: watchPartyByMatchId.get(km.matchId) ?? null,
       match: translateMatchTeamsToFa({
         id: km.match.id,
         homeTeamName: km.match.homeTeamName,
@@ -330,7 +339,7 @@ export async function getKandakatorForDate(userId: string, dateKey?: string) {
   if (await shouldUseMemoryDb()) {
     const existing = devMemoryDb.kandakator.getByDate(targetKey);
     const needsFreshApi =
-      isFootballDataConfigured() &&
+      isFixtureApiConfigured() &&
       (existing?.matches.some(
         (km) =>
           !isMatchResultKnown(km.match) &&
@@ -344,7 +353,7 @@ export async function getKandakatorForDate(userId: string, dateKey?: string) {
       } catch {
         // fallback to seed data below
       }
-    } else if (!existing && isFootballDataConfigured()) {
+    } else if (!existing && isFixtureApiConfigured()) {
       try {
         await hydrateMemoryKandakatorFromApi(targetKey);
       } catch {

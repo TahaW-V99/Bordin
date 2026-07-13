@@ -3,12 +3,13 @@ import { MatchStatus } from "@prisma/client";
 import { shouldUseMemoryDb } from "@/server/db";
 import { prisma } from "@/shared/lib/prisma";
 import {
+  buildFixtureExternalId,
   fetchMatchesForTehranDate,
-  isFootballDataConfigured,
-  mapFootballDataStatus,
+  isFixtureApiConfigured,
+  mapFixtureStatus,
   readMatchScore,
-  type FootballDataMatch,
-} from "@/server/services/football-data-api";
+  type FixtureMatch,
+} from "@/server/services/fixture-api";
 import { formatShamsiFromDateKey, kandakatorDateFromKey } from "@/shared/lib/dates";
 import { translateMatchTeamsToFa } from "@/shared/lib/football-names-fa";
 import { settleMatchPredictions } from "@/server/services/settlement-service";
@@ -16,7 +17,7 @@ import { tehranDateKey } from "@/server/memory/kandakator-seed";
 import { isMatchResultKnown } from "@/shared/lib/match-result";
 import { logMatchStatusChange } from "@/server/services/match-lifecycle-logger";
 import { recordKandakatorSync } from "@/server/services/kandakator-sync-health";
-import { readMatchScore as readApiMatchScore } from "@/server/services/football-data-api";
+import { readMatchScore as readApiMatchScore } from "@/server/services/fixture-api";
 import { enqueueKandakatorSyncDates } from "@/server/services/kandakator-sync-queue-service";
 import {
   canDeleteKandakatorData,
@@ -40,28 +41,28 @@ const lastSyncAtByDate = new Map<string, number>();
 const syncInFlight = new Set<string>();
 const settlementScheduled = new Set<string>();
 
-const footballApiCircuit = {
+const fixtureApiCircuit = {
   consecutiveFailures: 0,
   openUntil: 0,
 };
 
-export function isFootballApiCircuitOpen() {
-  return Date.now() < footballApiCircuit.openUntil;
+export function isFixtureApiCircuitOpen() {
+  return Date.now() < fixtureApiCircuit.openUntil;
 }
 
-function recordFootballApiSuccess() {
-  footballApiCircuit.consecutiveFailures = 0;
-  footballApiCircuit.openUntil = 0;
+function recordFixtureApiSuccess() {
+  fixtureApiCircuit.consecutiveFailures = 0;
+  fixtureApiCircuit.openUntil = 0;
 }
 
-function recordFootballApiFailure(error: unknown) {
-  footballApiCircuit.consecutiveFailures += 1;
-  if (footballApiCircuit.consecutiveFailures < API_CIRCUIT_FAILURE_THRESHOLD) return;
+function recordFixtureApiFailure(error: unknown) {
+  fixtureApiCircuit.consecutiveFailures += 1;
+  if (fixtureApiCircuit.consecutiveFailures < API_CIRCUIT_FAILURE_THRESHOLD) return;
 
-  footballApiCircuit.openUntil = Date.now() + API_CIRCUIT_COOLDOWN_MS;
+  fixtureApiCircuit.openUntil = Date.now() + API_CIRCUIT_COOLDOWN_MS;
   const reason = error instanceof Error ? error.message : String(error);
   console.warn(
-    `[Bordin] football-data.org unreachable (${reason}) — runtime kandakator sync paused for ${Math.round(API_CIRCUIT_COOLDOWN_MS / 60_000)} minutes. Push from your PC: npm run push:kandakator:staging`,
+    `[Bordin] Fixture API unreachable (${reason}) — runtime kandakator sync paused for ${Math.round(API_CIRCUIT_COOLDOWN_MS / 60_000)} minutes. Push from your PC: npm run push:kandakator:staging`,
   );
 }
 
@@ -69,16 +70,11 @@ export function isRuntimeKandakatorSyncEnabled() {
   const flag = process.env.KANDAKATOR_RUNTIME_SYNC?.trim().toLowerCase();
   if (flag === "true" || flag === "1") return true;
   if (flag === "false" || flag === "0") return false;
-  // Liara/staging often cannot reach football-data.org — default off outside local dev
   return process.env.NODE_ENV === "development";
 }
 
-/** Direct API sync only when allowed — Liara uses Cloudflare worker instead */
-export function isDirectFootballApiSyncAllowed() {
-  if (!isRuntimeKandakatorSyncEnabled() || !isFootballDataConfigured()) return false;
-  const cfUrl = process.env.KANDAKATOR_CF_SYNC_URL?.trim();
-  if (cfUrl && process.env.NODE_ENV === "production") return false;
-  return true;
+export function isDirectFixtureApiSyncAllowed() {
+  return isRuntimeKandakatorSyncEnabled() && isFixtureApiConfigured();
 }
 
 export function getPersistedAppBaseUrl() {
@@ -127,15 +123,15 @@ async function ensurePublishedKandakatorDay(
   });
 }
 
-function normalizeMatch(match: FootballDataMatch) {
+function normalizeMatch(match: FixtureMatch) {
   const { homeScore, awayScore } = readMatchScore(match);
-  const status = mapFootballDataStatus(match.status) as MatchStatus;
+  const status = mapFixtureStatus(match.status) as MatchStatus;
   const kickoffAt = new Date(match.utcDate);
   if (Number.isNaN(kickoffAt.getTime())) {
     throw new Error(`Invalid kickoff utcDate for match ${match.id}`);
   }
   return translateMatchTeamsToFa({
-    externalId: `football-data-${match.id}`,
+    externalId: buildFixtureExternalId(match.id),
     homeTeamName: match.homeTeam.name,
     awayTeamName: match.awayTeam.name,
     leagueName: match.competition?.name ?? null,
@@ -214,7 +210,7 @@ async function countKandakatorLinksForDate(dateKey: string) {
 
 export async function syncDailyKandakatorFromFootballMatches(
   dateKey: string,
-  matches: FootballDataMatch[],
+  matches: FixtureMatch[],
   options?: KandakatorSyncSafetyOptions,
 ): Promise<SyncKandakatorResult> {
   const syncStartedAt = Date.now();
@@ -360,7 +356,7 @@ export async function syncDailyKandakatorFromFootballMatches(
           existing.status !== status);
 
       if (
-        apiMatch.status === "FINISHED" &&
+        mapFixtureStatus(apiMatch.status) === "FINISHED" &&
         normalized.homeScore === null &&
         normalized.awayScore === null
       ) {
@@ -445,7 +441,7 @@ export async function syncDailyKandakatorFromFootballMatches(
   }
 
   lastSyncAtByDate.set(dateKey, Date.now());
-  recordFootballApiSuccess();
+  recordFixtureApiSuccess();
 
   void recordKandakatorSync({
     scope: `date:${dateKey}`,
@@ -481,9 +477,7 @@ type KandakatorWithMatches = {
 function kandakatorNeedsApiRefresh(dateKey: string, existing: KandakatorWithMatches | null) {
   if (!existing || existing.matches.length === 0) return true;
 
-  const hasApiMatches = existing.matches.some((row) =>
-    row.match.externalId?.startsWith("football-data-"),
-  );
+  const hasApiMatches = existing.matches.some((row) => Boolean(row.match.externalId));
   if (!hasApiMatches) return true;
 
   const now = Date.now();

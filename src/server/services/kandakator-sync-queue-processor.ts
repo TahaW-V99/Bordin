@@ -10,18 +10,14 @@ import {
   markKandakatorSyncJobWritten,
 } from "@/server/services/kandakator-sync-queue-service";
 import {
-  getCloudflareSyncUrl,
-  triggerQueuedRemoteSyncJob,
-} from "@/server/services/kandakator-remote-sync-service";
-import {
-  isDirectFootballApiSyncAllowed,
+  isDirectFixtureApiSyncAllowed,
   syncDailyKandakatorFromFootballMatches,
 } from "@/server/services/kandakator-sync-service";
 import {
   fetchMatchesForTehranDate,
-  isFootballDataConfigured,
-  type FootballDataMatch,
-} from "@/server/services/football-data-api";
+  isFixtureApiConfigured,
+  type FixtureMatch,
+} from "@/server/services/fixture-api";
 import { kandakatorDateFromKey } from "@/shared/lib/dates";
 import {
   isEmptyApiPayload,
@@ -33,7 +29,11 @@ const PROCESSOR_ID = `kandakator-sync-${Date.now()}-${Math.random().toString(36)
 
 function isEmergencyDirectSyncAllowed() {
   const flag = process.env.KANDAKATOR_SYNC_EMERGENCY_DIRECT?.trim().toLowerCase();
-  return (flag === "true" || flag === "1") && isFootballDataConfigured();
+  return (flag === "true" || flag === "1") && isFixtureApiConfigured();
+}
+
+function canFetchDirectly() {
+  return isDirectFixtureApiSyncAllowed() || isEmergencyDirectSyncAllowed() || isFixtureApiConfigured();
 }
 
 export async function verifyPersistedKandakatorWrite(dateKey: string, expectedCount: number) {
@@ -54,7 +54,7 @@ export async function verifyPersistedKandakatorWrite(dateKey: string, expectedCo
   });
 
   const persistedCount =
-    row?.matches.filter((item) => item.match.externalId?.startsWith("football-data-")).length ?? 0;
+    row?.matches.filter((item) => Boolean(item.match.externalId)).length ?? 0;
 
   if (expectedCount === 0) return persistedCount === 0 || persistedCount > 0;
   return persistedCount >= expectedCount;
@@ -69,50 +69,19 @@ async function fetchMatchesDirect(dateKey: string) {
   };
 }
 
-async function runRemoteJob(dateKey: string, jobId: string) {
-  const workerUrl = getCloudflareSyncUrl();
-
-  if (!workerUrl) {
-    if (isDirectFootballApiSyncAllowed() || isEmergencyDirectSyncAllowed()) {
-      console.info("[Bordin:sync-queue]", JSON.stringify({
-        event: "direct_fetch",
-        jobId,
-        dateKey,
-      }));
-      const direct = await fetchMatchesDirect(dateKey);
-      return { ...direct, synced: { date: dateKey, matchCount: 0, kandakatorId: null as string | null } };
-    }
-    if (process.env.NODE_ENV !== "development") {
-      throw new Error("remote_worker_not_configured");
-    }
-    const direct = await fetchMatchesDirect(dateKey);
-    return { ...direct, synced: { date: dateKey, matchCount: 0, kandakatorId: null as string | null } };
+async function runFetchJob(dateKey: string, jobId: string) {
+  if (!canFetchDirectly()) {
+    throw new Error("fixture_api_not_configured");
   }
 
   console.info("[Bordin:sync-queue]", JSON.stringify({
-    event: "remote_fetch_start",
+    event: "direct_fetch",
     jobId,
     dateKey,
-    workerUrl,
   }));
 
-  try {
-    return await triggerQueuedRemoteSyncJob({
-      jobId,
-      dateKey,
-      source: "queue-remote",
-    });
-  } catch (error) {
-    if (isEmergencyDirectSyncAllowed() || isDirectFootballApiSyncAllowed()) {
-      console.warn(
-        `[Bordin:sync-queue] remote fetch failed for ${dateKey}, falling back to direct API`,
-        error instanceof Error ? error.message : error,
-      );
-      const direct = await fetchMatchesDirect(dateKey);
-      return { ...direct, synced: { date: dateKey, matchCount: 0, kandakatorId: null as string | null } };
-    }
-    throw error;
-  }
+  const direct = await fetchMatchesDirect(dateKey);
+  return { ...direct, synced: { date: dateKey, matchCount: 0, kandakatorId: null as string | null } };
 }
 
 export async function processOneKandakatorSyncJob() {
@@ -124,8 +93,8 @@ export async function processOneKandakatorSyncJob() {
   const startedAt = Date.now();
 
   try {
-    const runResult = await runRemoteJob(job.dateKey, job.id);
-    const fetchSource = getCloudflareSyncUrl() ? "remote" : "direct";
+    const runResult = await runFetchJob(job.dateKey, job.id);
+    const fetchSource = "direct";
 
     await markKandakatorSyncJobFetched(job.id, {
       dateKey: job.dateKey,
@@ -149,7 +118,7 @@ export async function processOneKandakatorSyncJob() {
       } else if (runResult.matches.length > 0) {
         const synced = await syncDailyKandakatorFromFootballMatches(
           job.dateKey,
-          runResult.matches as FootballDataMatch[],
+          runResult.matches as FixtureMatch[],
           {
             publish: true,
             source: `queue:${fetchSource}-write`,
@@ -161,7 +130,7 @@ export async function processOneKandakatorSyncJob() {
     } else {
       const synced = await syncDailyKandakatorFromFootballMatches(
         job.dateKey,
-        runResult.matches as FootballDataMatch[],
+        runResult.matches as FixtureMatch[],
         {
           publish: true,
           source: `queue:${fetchSource}-write`,

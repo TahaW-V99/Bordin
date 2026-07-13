@@ -2,12 +2,14 @@ import { addDays } from "date-fns";
 import { formatInTimeZone } from "date-fns-tz";
 import { TEHRAN_TZ } from "@/shared/lib/dates";
 import {
+  buildFixtureExternalId,
   fetchMatchesInRange,
-  type FootballDataMatch,
-  isFootballDataConfigured,
-  mapFootballDataStatus,
+  type FixtureMatch,
+  isFixtureApiConfigured,
+  mapFixtureStatus,
+  parseFixtureExternalId,
   readMatchScore,
-} from "@/server/services/football-data-api";
+} from "@/server/services/fixture-api";
 import { translateMatchTeamsToFa, translateLeagueNameToFa } from "@/shared/lib/football-names-fa";
 import type { MatchStatus } from "@prisma/client";
 import { prisma } from "@/shared/lib/prisma";
@@ -55,16 +57,15 @@ export function leagueNameToCompetitionId(leagueName: string) {
 }
 
 function parseApiMatchId(externalId: string) {
-  const match = externalId.match(/football-data-(\d+)/);
-  return match ? Number(match[1]) : 0;
+  return parseFixtureExternalId(externalId) ?? 0;
 }
 
-function normalizeApiMatch(match: FootballDataMatch) {
+function normalizeApiMatch(match: FixtureMatch) {
   const { homeScore, awayScore } = readMatchScore(match);
-  const status = mapFootballDataStatus(match.status) as MatchStatus;
+  const status = mapFixtureStatus(match.status) as MatchStatus;
   const kickoffAt = new Date(match.utcDate);
   return translateMatchTeamsToFa({
-    externalId: `football-data-${match.id}`,
+    externalId: buildFixtureExternalId(match.id),
     homeTeamName: match.homeTeam.name,
     awayTeamName: match.awayTeam.name,
     leagueName: match.competition?.name ?? "سایر",
@@ -75,9 +76,9 @@ function normalizeApiMatch(match: FootballDataMatch) {
   });
 }
 
-async function fetchUpcomingApiMatches(daysAhead = 30): Promise<FootballDataMatch[]> {
-  if (!isFootballDataConfigured()) {
-    throw new Error("FOOTBALL_DATA_API_KEY در env تنظیم نشده است");
+async function fetchUpcomingApiMatches(daysAhead = 30): Promise<FixtureMatch[]> {
+  if (!isFixtureApiConfigured()) {
+    throw new Error("FIXTURE_API_KEY در env تنظیم نشده است");
   }
 
   const todayKey = formatInTimeZone(new Date(), TEHRAN_TZ, "yyyy-MM-dd");
@@ -89,7 +90,7 @@ async function fetchUpcomingApiMatches(daysAhead = 30): Promise<FootballDataMatc
 
   const matches = await fetchMatchesInRange(todayKey, endKey, { noCache: true });
   return matches
-    .filter((m) => m.status !== "FINISHED" && m.status !== "AWARDED")
+    .filter((m) => !["FT", "AET", "PEN", "AWD", "WO"].includes(m.status))
     .sort((a, b) => new Date(a.utcDate).getTime() - new Date(b.utcDate).getTime());
 }
 
@@ -221,7 +222,7 @@ export async function listAdminFootballMatchesByCompetition(
   return filtered.map(toAdminMatchOption);
 }
 
-function catalogMatchFromApi(match: FootballDataMatch): CatalogMatch {
+function catalogMatchFromApi(match: FixtureMatch): CatalogMatch {
   const normalized = normalizeApiMatch(match);
   const leagueName = normalized.leagueName ?? "سایر";
   return {
@@ -252,7 +253,7 @@ export async function loadCatalogMatchesInRange(
   const byExternal = new Map<string, CatalogMatch>();
 
   try {
-    if (isFootballDataConfigured()) {
+    if (isFixtureApiConfigured()) {
       const apiMatches = await fetchMatchesInRange(dateFrom, dateTo, { noCache: true });
       for (const match of apiMatches) {
         const catalog = catalogMatchFromApi(match);
@@ -344,12 +345,12 @@ export async function upsertFootballMatchesByExternalIds(externalIds: string[]) 
       continue;
     }
 
-    if (!isFootballDataConfigured()) {
-      throw new Error("FOOTBALL_DATA_API_KEY در env تنظیم نشده است");
+    if (!isFixtureApiConfigured()) {
+      throw new Error("FIXTURE_API_KEY در env تنظیم نشده است");
     }
 
     const apiMatches = await fetchUpcomingApiMatches();
-    const apiMatch = apiMatches.find((m) => `football-data-${m.id}` === externalId);
+    const apiMatch = apiMatches.find((m) => buildFixtureExternalId(m.id) === externalId);
     if (!apiMatch) {
       throw new Error(`مسابقه ${externalId} در بازه یک ماه آینده یافت نشد`);
     }

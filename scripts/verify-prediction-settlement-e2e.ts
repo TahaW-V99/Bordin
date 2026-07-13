@@ -117,7 +117,7 @@ async function main() {
   );
   devMemoryDb.kandakator.mergeDayFromApi(mergeDateKey, [
     {
-      matchId: "football-data-orphan-test",
+      matchId: "fixture-orphan-test",
       homeTeamName: km3!.match.homeTeamName,
       awayTeamName: km3!.match.awayTeamName,
       leagueName: km3!.match.leagueName,

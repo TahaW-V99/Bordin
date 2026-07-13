@@ -41,6 +41,7 @@ enum CoinTransactionType {
   ADMIN_ADJUSTMENT
   PROFILE_NAME_CHANGE
   PROFILE_AVATAR_PURCHASE
+  WATCH_PARTY_ENTRY
 }
 
 enum XpTransactionType {
@@ -185,6 +186,7 @@ enum NotificationType {
   TEAM_LEADERBOARD_RANK_UP
   TEAM_INVITE
   TEAM_MEMBER_LEFT
+  WATCH_PARTY_INVITE
 }
 
 enum NotificationCategory {
@@ -238,6 +240,7 @@ model User {
   onboardingComplete Boolean   @default(false)
   isActive           Boolean   @default(true)
   lastLoginAt        DateTime?
+  lastSeenAt         DateTime?
   failedPasswordAttempts Int   @default(0)
   passwordLockedUntil DateTime?
   createdAt          DateTime  @default(now())
@@ -271,6 +274,10 @@ model User {
   chatMessageReports ChatMessageReport[]
   chatReactions      ChatReaction[]
   chatRoomReads      ChatRoomRead[]
+  watchPartyRoomsCreated WatchPartyRoom[] @relation("WatchPartyCreator")
+  watchPartyEntries  WatchPartyEntry[]
+  watchPartyInvitesSent WatchPartyInvite[] @relation("WatchPartyInviter")
+  watchPartyInvitesReceived WatchPartyInvite[] @relation("WatchPartyInvitee")
 
   @@index([phone])
   @@map("users")
@@ -427,6 +434,7 @@ model FootballMatch {
   predictions               Prediction[]
   cups                      Cup[]
   teamCompetitionStageMatches TeamCompetitionStageMatch[]
+  watchPartyRoom            WatchPartyRoom?
 
   @@index([kickoffAt, status])
   @@map("football_matches")
@@ -1276,6 +1284,62 @@ model KandakatorSyncJob {
   @@index([dateKey, status])
   @@index([createdAt])
   @@map("kandakator_sync_jobs")
+}
+
+model WatchPartyRoom {
+  id            String   @id @default(cuid())
+  matchId       String   @unique
+  googleMeetUrl String   @db.Text
+  capacity      Int
+  entryFeeCoins Int
+  isPublished   Boolean  @default(false)
+  publishedAt   DateTime?
+  createdById   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  match     FootballMatch     @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  createdBy User?             @relation("WatchPartyCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  entries   WatchPartyEntry[]
+  invites   WatchPartyInvite[]
+
+  @@index([isPublished])
+  @@map("watch_party_rooms")
+}
+
+model WatchPartyEntry {
+  id        String   @id @default(cuid())
+  roomId    String
+  userId    String
+  paidCoins Int
+  joinedAt  DateTime @default(now())
+
+  room WatchPartyRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, userId])
+  @@index([roomId])
+  @@index([userId])
+  @@map("watch_party_entries")
+}
+
+model WatchPartyInvite {
+  id          String    @id @default(cuid())
+  roomId      String
+  inviterId   String
+  inviteeId   String
+  pushSentAt  DateTime?
+  smsSentAt   DateTime?
+  dismissedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  room    WatchPartyRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  inviter User           @relation("WatchPartyInviter", fields: [inviterId], references: [id], onDelete: Cascade)
+  invitee User           @relation("WatchPartyInvitee", fields: [inviteeId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, inviterId, inviteeId])
+  @@index([inviteeId, dismissedAt])
+  @@map("watch_party_invites")
 }
 
 enum LegacyUserImportStatus {
