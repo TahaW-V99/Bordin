@@ -56,6 +56,66 @@ const TEAM_NAMES_FA: Record<string, string> = {
   "Aston Villa FC": "استون ویلا",
   "Aston Villa": "استون ویلا",
 
+  Botafogo: "بوتافوگو",
+  "Botafogo FR": "بوتافوگو",
+  "Botafogo RJ": "بوتافوگو",
+  "CR Vasco da Gama": "واسکو د گاما",
+  "Vasco DA Gama": "واسکو د گاما",
+  Vasco: "واسکو",
+  Fluminense: "فلومیننزه",
+  "Fluminense FC": "فلومیننزه",
+  Cruzeiro: "کروزیرو",
+  "Cruzeiro EC": "کروزیرو",
+  Bahia: "باهیا",
+  "EC Bahia": "باهیا",
+  Fortaleza: "فورتالزا",
+  "Fortaleza EC": "فورتالزا",
+  "Athletico Paranaense": "اتلتیکو پارانائنزه",
+  "Athletico-PR": "اتلتیکو پارانائنزه",
+  "CA Paranaense": "اتلتیکو پارانائنزه",
+  "RB Bragantino": "ردبول براگانتینو",
+  "Red Bull Bragantino": "ردبول براگانتینو",
+  Bragantino: "براگانتینو",
+  Ceara: "سیارا",
+  "Ceará": "سیارا",
+  "Ceará SC": "سیارا",
+  Mirassol: "میراسول",
+  "Mirassol FC": "میراسول",
+
+  // لیگ برتر برزیل — ادامه
+  "SE Palmeiras": "پالمیراس",
+  Palmeiras: "پالمیراس",
+  "SC Corinthians Paulista": "کورینتیانس",
+  Corinthians: "کورینتیانس",
+  "Sao Paulo": "سائوپائولو",
+  "São Paulo": "سائوپائولو",
+  "São Paulo FC": "سائوپائولو",
+  "Santos FC": "سانتوس",
+  Santos: "سانتوس",
+  Gremio: "گریمیو",
+  "Grêmio": "گریمیو",
+  "Grêmio FBPA": "گریمیو",
+  "SC Internacional": "اینترناسیونال",
+  Internacional: "اینترناسیونال",
+  "Atletico-MG": "اتلتیکو مینیرو",
+  "Atletico Mineiro": "اتلتیکو مینیرو",
+  "Clube Atlético Mineiro": "اتلتیکو مینیرو",
+  "CA Mineiro": "اتلتیکو مینیرو",
+  Goias: "گویاس",
+  "Goias EC": "گویاس",
+  Juventude: "ژوونتوده",
+  "EC Juventude": "ژوونتوده",
+  "Sport Recife": "اسپورت رسیف",
+  Sport: "اسپورت رسیف",
+  Vitoria: "ویتوریا",
+  "Vitória": "ویتوریا",
+  "EC Vitoria": "ویتوریا",
+  Cuiaba: "کویابا",
+  "Cuiabá": "کویابا",
+  "Cuiaba EC": "کویابا",
+  "CR Flamengo": "فلامینگو",
+  Flamengo: "فلامینگو",
+
   // بوندسلیگا
   "FC Bayern München": "بایرن مونیخ",
   "Bayern Munich": "بایرن مونیخ",
@@ -219,6 +279,13 @@ const LEAGUE_NAMES_FA: Record<string, string> = {
   "Bundesliga": "بوندسلیگا",
   "Serie A": "سری آ",
   "Ligue 1": "لیگ ۱ فرانسه",
+  "Campeonato Brasileiro Série A": "لیگ برتر برزیل",
+  "Campeonato Brasileiro Serie A": "لیگ برتر برزیل",
+  "Campeonato Brasileiro": "لیگ برتر برزیل",
+  "Brasileirão": "لیگ برتر برزیل",
+  "Brasileirao": "لیگ برتر برزیل",
+  "Brazilian Serie A": "لیگ برتر برزیل",
+  "Serie B": "لیگ دسته دوم برزیل",
   "UEFA Champions League": "لیگ قهرمانان",
   "Champions League": "لیگ قهرمانان",
   "UEFA Europa League": "لیگ اروپا",
@@ -292,10 +359,17 @@ function lookupFa(name: string, exactMap: Record<string, string>, normalizedMap:
   return trimmed;
 }
 
+/** نام کاملاً فارسی (بدون حروف لاتین) */
+export function isFullyPersianName(name: string | null | undefined) {
+  if (!name?.trim()) return false;
+  const trimmed = name.trim();
+  return /[\u0600-\u06FF]/.test(trimmed) && !/[A-Za-z]/.test(trimmed);
+}
+
 export function translateTeamNameToFa(name: string) {
   const trimmed = name.trim();
   if (!trimmed) return name;
-  if (/[\u0600-\u06FF]/.test(trimmed)) return trimmed;
+  if (isFullyPersianName(trimmed)) return trimmed;
 
   const club = lookupFa(trimmed, TEAM_NAMES_FA, TEAM_BY_NORMALIZED);
   if (club !== trimmed) return club;
@@ -303,15 +377,26 @@ export function translateTeamNameToFa(name: string) {
   return lookupFa(trimmed, NATIONAL_TEAM_NAMES_FA, NATIONAL_BY_NORMALIZED);
 }
 
-export function translateLeagueNameToFa(name: string | null | undefined) {
+export function translateLeagueNameToFa(name: string | null | undefined, leagueId?: number) {
+  if (leagueId === 71) return "لیگ برتر برزیل";
+  if (leagueId === 72) return "لیگ دسته دوم برزیل";
+  if (leagueId === 135) return "سری آ";
+
   if (!name?.trim()) return name ?? null;
   const trimmed = name.trim();
-  if (/[\u0600-\u06FF]/.test(trimmed)) return trimmed;
+  if (isFullyPersianName(trimmed)) return trimmed;
 
   const exact = lookupFa(trimmed, LEAGUE_NAMES_FA, LEAGUE_BY_NORMALIZED);
   if (exact !== trimmed) return exact;
 
-  for (const [en, fa] of Object.entries(LEAGUE_NAMES_FA)) {
+  const includesOrder: Array<[string, string]> = [
+    ["Campeonato Brasileiro", "لیگ برتر برزیل"],
+    ["Brasileir", "لیگ برتر برزیل"],
+    ["Brazilian Serie A", "لیگ برتر برزیل"],
+    ...Object.entries(LEAGUE_NAMES_FA),
+  ];
+
+  for (const [en, fa] of includesOrder) {
     if (trimmed.includes(en)) return fa;
   }
 

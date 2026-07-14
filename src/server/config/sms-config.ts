@@ -71,6 +71,8 @@ export function getSmsIrConfig() {
     shebaVerifiedTemplateId: 637983,
     withdrawalApprovedTemplateId: 933684,
     withdrawalAdminAlertTemplateId: 740206,
+    watchPartyInviteTemplateId:
+      parseTemplateId(process.env.SMS_IR_WATCH_PARTY_INVITE_TEMPLATE_ID) ?? 914941,
     parameterNames: getSmsIrOtpParameterNames(),
     baseUrl: process.env.SMS_IR_API_BASE_URL?.trim() || "https://api.sms.ir/v1",
     timeoutMs: Number.parseInt(process.env.SMS_IR_REQUEST_TIMEOUT_MS ?? "10000", 10) || 10_000,
@@ -109,10 +111,12 @@ export function buildSmsIrTemplatePayload(
   template:
     | "sheba_verified"
     | "withdrawal_approved"
-    | "withdrawal_admin_alert",
+    | "withdrawal_admin_alert"
+    | "watch_party_invite",
   fields: {
     name: string;
     amount?: string;
+    title?: string;
   },
 ): SmsTemplatePayload {
   const config = assertSmsIrApiConfig();
@@ -137,6 +141,14 @@ export function buildSmsIrTemplatePayload(
         parameters: [
           { name: "NAME", value: fields.name },
           { name: "AMOUNT", value: fields.amount ?? "" },
+        ],
+      };
+    case "watch_party_invite":
+      return {
+        templateId: config.watchPartyInviteTemplateId,
+        parameters: [
+          { name: "TITLE", value: fields.title ?? "" },
+          { name: "NAME", value: fields.name },
         ],
       };
   }

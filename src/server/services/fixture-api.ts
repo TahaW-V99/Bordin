@@ -143,7 +143,7 @@ function parseApiJsonBody(raw: unknown): ApiFixturesResponse | null {
 
 async function fetchFixturesFromApi(
   params: Record<string, string>,
-  options?: { noCache?: boolean },
+  options?: { noCache?: boolean; skipLocalization?: boolean },
 ): Promise<FixtureMatch[]> {
   const apiKey = getApiKey();
   if (!apiKey) {
@@ -180,7 +180,10 @@ async function fetchFixturesFromApi(
 
       if (apiError) throw new Error(apiError);
 
-      return normalizeApiFixtures(json?.response).map(mapApiFixture);
+      const mapped = normalizeApiFixtures(json?.response).map(mapApiFixture);
+      if (options?.skipLocalization) return mapped;
+      const { localizeFixtureMatches } = await import("@/server/services/fixture-persian-names");
+      return localizeFixtureMatches(mapped);
     } catch (error) {
       if (error instanceof Error && /fetch failed/i.test(error.message)) {
         throw new Error(
@@ -206,14 +209,17 @@ function enumerateDateKeys(dateFrom: string, dateTo: string) {
   });
 }
 
-export async function fetchMatchesByDate(date: string, options?: { noCache?: boolean }) {
+export async function fetchMatchesByDate(
+  date: string,
+  options?: { noCache?: boolean; skipLocalization?: boolean },
+) {
   return fetchFixturesFromApi({ date }, options);
 }
 
 export async function fetchMatchesInRange(
   dateFrom: string,
   dateTo: string,
-  options?: { noCache?: boolean },
+  options?: { noCache?: boolean; skipLocalization?: boolean },
 ) {
   const dates = enumerateDateKeys(dateFrom, dateTo);
   if (dates.length === 0) return [];
@@ -235,14 +241,17 @@ export async function fetchMatchesInRange(
   );
 }
 
-export async function fetchMatchById(apiMatchId: number, options?: { noCache?: boolean }) {
+export async function fetchMatchById(
+  apiMatchId: number,
+  options?: { noCache?: boolean; skipLocalization?: boolean },
+) {
   const rows = await fetchFixturesFromApi({ id: String(apiMatchId) }, options);
   return rows[0] ?? null;
 }
 
 export async function fetchMatchesForTehranDate(
   tehranDateKey: string,
-  options?: { noCache?: boolean },
+  options?: { noCache?: boolean; skipLocalization?: boolean },
 ) {
   const dayStart = fromZonedTime(`${tehranDateKey}T00:00:00`, TEHRAN_TZ);
   const dayEnd = fromZonedTime(`${tehranDateKey}T23:59:59`, TEHRAN_TZ);

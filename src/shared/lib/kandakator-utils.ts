@@ -19,6 +19,7 @@ export type ClientKandakatorMatch = {
     entryFeeCoins: number;
     occupiedCount: number;
     hasJoined: boolean;
+    buttonForceActive: boolean;
     uiPhase: "upcoming" | "active";
     googleMeetUrl: string | null;
   } | null;

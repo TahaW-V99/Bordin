@@ -17,6 +17,7 @@ export function LeagueAccordionGroup({
   onSubmitted,
   autoOpenWatchPartyMatchId,
   onWatchPartyAutoOpened,
+  highlightWatchParty = false,
   defaultOpen = true,
 }: {
   leagueName: string;
@@ -29,6 +30,7 @@ export function LeagueAccordionGroup({
   onSubmitted: () => void;
   autoOpenWatchPartyMatchId?: string | null;
   onWatchPartyAutoOpened?: () => void;
+  highlightWatchParty?: boolean;
   defaultOpen?: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -67,6 +69,7 @@ export function LeagueAccordionGroup({
               onSubmitted={onSubmitted}
               autoOpenWatchParty={km.matchId === autoOpenWatchPartyMatchId}
               onWatchPartyAutoOpened={onWatchPartyAutoOpened}
+              highlightWatchParty={highlightWatchParty}
             />
           ))}
         </div>

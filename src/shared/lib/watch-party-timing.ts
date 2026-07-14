@@ -15,11 +15,12 @@ export function getWatchPartyHideAt(kickoffAt: Date | string) {
 export function getWatchPartyUiPhase(
   kickoffAt: Date | string,
   now = Date.now(),
+  options?: { forceActive?: boolean },
 ): WatchPartyUiPhase {
   const hideAt = getWatchPartyHideAt(kickoffAt);
   const activateAt = getWatchPartyActivateAt(kickoffAt);
   if (now >= hideAt) return "hidden";
-  if (now >= activateAt) return "active";
+  if (options?.forceActive || now >= activateAt) return "active";
   return "upcoming";
 }
 

@@ -121,6 +121,7 @@ export function MatchPredictionCard({
   onSubmitted,
   autoOpenWatchParty,
   onWatchPartyAutoOpened,
+  highlightWatchParty = false,
 }: {
   matchId: string;
   kandakatorId: string;
@@ -137,6 +138,7 @@ export function MatchPredictionCard({
   onSubmitted: () => void;
   autoOpenWatchParty?: boolean;
   onWatchPartyAutoOpened?: () => void;
+  highlightWatchParty?: boolean;
 }) {
   const { toast } = useToast();
   const [home, setHome] = useState(existingPrediction?.homePrediction ?? 0);
@@ -469,24 +471,19 @@ export function MatchPredictionCard({
               </span>
             ) : null}
           </div>
-          {perfectReward || watchPartyState ? (
-            <div className="flex items-start justify-between gap-2">
-              {watchPartyState ? (
-                <WatchPartyButton
-                  kickoffAt={match.kickoffAt}
-                  watchParty={watchPartyState}
-                  onOpen={() => setWatchPartyOpen(true)}
-                />
-              ) : (
-                <span />
-              )}
-              {perfectReward ? (
-                <span className="inline-flex animate-pulse items-center rounded-full border border-bordin-green/35 bg-bordin-green/12 px-2.5 py-1 text-[11px] font-semibold text-bordin-green shadow-[0_0_18px_rgba(34,197,94,0.14)]">
-                  جایزه ۱۰۰٪ صحت: {formatPersianNumber(perfectReward.coins)} سکه +{" "}
-                  {formatPersianNumber(perfectReward.xp)} امتیاز
-                </span>
-              ) : null}
-            </div>
+          {perfectReward ? (
+            <span className="inline-flex w-fit animate-pulse items-center rounded-full border border-bordin-green/35 bg-bordin-green/12 px-2.5 py-1 text-[11px] font-semibold text-bordin-green shadow-[0_0_18px_rgba(34,197,94,0.14)]">
+              جایزه ۱۰۰٪ صحت: {formatPersianNumber(perfectReward.coins)} سکه +{" "}
+              {formatPersianNumber(perfectReward.xp)} امتیاز
+            </span>
+          ) : null}
+          {watchPartyState ? (
+            <WatchPartyButton
+              kickoffAt={match.kickoffAt}
+              watchParty={watchPartyState}
+              onOpen={() => setWatchPartyOpen(true)}
+              highlightBlink={highlightWatchParty}
+            />
           ) : null}
         </div>
 

@@ -11,6 +11,14 @@ import { TeamCompetitionHomeSlider } from "@/features/home/components/team-compe
 import { WeekDayStrip, type WeekDayItem } from "@/features/home/components/week-day-strip";
 import { LeagueAccordionGroup } from "@/features/home/components/league-accordion-group";
 import { DisplayNameRequiredModal } from "@/features/predictions/components/display-name-required-modal";
+import {
+  isWatchPartyPromoDismissed,
+  WatchPartyPromoModal,
+} from "@/features/watch-party/components/watch-party-promo-modal";
+import {
+  WATCH_PARTY_PROMO_START_MS,
+  WATCH_PARTY_PROMO_WINDOW_MS,
+} from "@/shared/constants/watch-party";
 import { translateTeamNameToFa } from "@/shared/lib/football-names-fa";
 import { isMatchResultKnown } from "@/shared/lib/match-result";
 import Link from "next/link";
@@ -36,6 +44,7 @@ type KandakatorDto = {
       entryFeeCoins: number;
       occupiedCount: number;
       hasJoined: boolean;
+      buttonForceActive: boolean;
       uiPhase: "upcoming" | "active";
       googleMeetUrl: string | null;
     } | null;
@@ -62,6 +71,7 @@ type KandakatorDto = {
 export function HomeDashboard() {
   const searchParams = useSearchParams();
   const pendingWatchPartyMatchId = searchParams.get("watchParty");
+  const highlightWatchParty = searchParams.get("highlightWatchParty") === "1";
   const [weekDays, setWeekDays] = useState<WeekDayItem[]>([]);
   const [selectedDate, setSelectedDate] = useState("");
   const [kandakator, setKandakator] = useState<KandakatorDto | null>(null);
@@ -79,6 +89,18 @@ export function HomeDashboard() {
   const [kandakatorLoading, setKandakatorLoading] = useState(false);
   const [nameModalOpen, setNameModalOpen] = useState(false);
   const [autoOpenWatchPartyMatchId, setAutoOpenWatchPartyMatchId] = useState<string | null>(null);
+  const [promoOpen, setPromoOpen] = useState(false);
+
+  useEffect(() => {
+    if (highlightWatchParty || pendingWatchPartyMatchId) return;
+    if (isWatchPartyPromoDismissed()) return;
+
+    const now = Date.now();
+    const promoEnd = WATCH_PARTY_PROMO_START_MS + WATCH_PARTY_PROMO_WINDOW_MS;
+    if (now < WATCH_PARTY_PROMO_START_MS || now > promoEnd) return;
+
+    setPromoOpen(true);
+  }, [highlightWatchParty, pendingWatchPartyMatchId]);
 
   useEffect(() => {
     if (pendingWatchPartyMatchId) {
@@ -224,6 +246,7 @@ export function HomeDashboard() {
                     }}
                     autoOpenWatchPartyMatchId={autoOpenWatchPartyMatchId}
                     onWatchPartyAutoOpened={() => setAutoOpenWatchPartyMatchId(null)}
+                    highlightWatchParty={highlightWatchParty}
                     defaultOpen={index === 0}
                   />
                 ))}
@@ -298,6 +321,8 @@ export function HomeDashboard() {
         open={nameModalOpen}
         onClose={() => setNameModalOpen(false)}
       />
+
+      <WatchPartyPromoModal open={promoOpen} onDismiss={() => setPromoOpen(false)} />
     </>
   );
 }

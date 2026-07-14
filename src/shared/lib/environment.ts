@@ -114,17 +114,21 @@ export function resolvePublicAppOrigin(request?: Pick<Request, "headers">): stri
   return resolveStoreReturnOrigin(request);
 }
 
-const DEFAULT_PRODUCTION_SOCIAL_MIRROR = "https://bordin-open.bordinir.workers.dev";
-const DEFAULT_STAGING_SOCIAL_MIRROR = "https://bordintest-open.bordinir.workers.dev";
+const DEFAULT_PRODUCTION_SOCIAL_MIRROR = "https://bordin.ir";
+const DEFAULT_STAGING_SOCIAL_MIRROR = "https://bordintest.ir";
 
 function sanitizeSocialMirrorOrigin(value?: string | null): string | null {
   if (!value?.trim()) return null;
-  return originFromUrl(value.trim());
+  const origin = originFromUrl(value.trim());
+  if (!origin) return null;
+  // Legacy workers.dev mirrors are retired; never use them as share targets.
+  if (origin.includes(".workers.dev")) return null;
+  return origin;
 }
 
 /**
- * Mirror origin for Telegram/Instagram share links (Cloudflare edge).
- * Falls back to the live app origin when unset.
+ * Origin for Telegram/Instagram share links and in-app browser entry.
+ * Defaults to the live app domain (bordin.ir / bordintest.ir).
  */
 export function resolveSocialShareOrigin(request?: Pick<Request, "headers">): string {
   const fromEnv =

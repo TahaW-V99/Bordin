@@ -8,6 +8,7 @@ import { Input } from "@/shared/components/ui/input";
 import { useToast } from "@/shared/components/ui/toast";
 import { cn } from "@/shared/lib/cn";
 import { formatPersianNumber } from "@/shared/lib/dates";
+import { WATCH_PARTY_INVITE_CAPACITY_ERROR } from "@/shared/constants/watch-party";
 
 type InviteUser = {
   id: string;
@@ -35,6 +36,7 @@ export function WatchPartyInviteModal({
   const [selected, setSelected] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
+  const [capacityError, setCapacityError] = useState(false);
 
   const load = useCallback(async (q: string) => {
     setLoading(true);
@@ -52,6 +54,7 @@ export function WatchPartyInviteModal({
     if (!open) return;
     setSelected([]);
     setQuery("");
+    setCapacityError(false);
     void load("");
   }, [open, load]);
 
@@ -63,8 +66,15 @@ export function WatchPartyInviteModal({
 
   const toggle = (userId: string) => {
     setSelected((prev) => {
-      if (prev.includes(userId)) return prev.filter((id) => id !== userId);
-      if (prev.length >= maxSelectable) return prev;
+      if (prev.includes(userId)) {
+        setCapacityError(false);
+        return prev.filter((id) => id !== userId);
+      }
+      if (prev.length >= maxSelectable) {
+        setCapacityError(true);
+        return prev;
+      }
+      setCapacityError(false);
       return [...prev, userId];
     });
   };
@@ -100,6 +110,12 @@ export function WatchPartyInviteModal({
           حداکثر {formatPersianNumber(maxSelectable)} نفر · انتخاب‌شده:{" "}
           {formatPersianNumber(selected.length)}
         </p>
+
+        {capacityError ? (
+          <p className="text-center text-sm font-semibold text-red-400">
+            {WATCH_PARTY_INVITE_CAPACITY_ERROR}
+          </p>
+        ) : null}
 
         <div className="relative">
           <Search className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/35" />

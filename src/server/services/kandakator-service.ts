@@ -34,6 +34,7 @@ import {
   readMatchScore,
 } from "@/server/services/fixture-api";
 import { translateMatchTeamsToFa } from "@/shared/lib/football-names-fa";
+import { scheduleBackgroundPersianRefreshForStoredMatches } from "@/server/services/fixture-persian-names";
 import { getKnockoutPredictionUiState } from "@/server/services/team-competition-knockout-prediction-service";
 import {
   getWatchPartyMapForMatchIds,
@@ -433,5 +434,11 @@ export async function getKandakatorForDate(userId: string, dateKey?: string) {
   }
 
   void settleKandakatorFinishedMatches(kandakator.id).catch(() => {});
+
+  scheduleBackgroundPersianRefreshForStoredMatches(
+    targetKey,
+    kandakator.matches.map((km) => km.match),
+  );
+
   return buildKandakatorDto(userId, targetKey, kandakator);
 }

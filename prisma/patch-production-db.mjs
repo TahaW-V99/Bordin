@@ -79,6 +79,7 @@ const statements = [
     capacity INT NOT NULL,
     entryFeeCoins INT NOT NULL,
     isPublished TINYINT(1) NOT NULL DEFAULT 0,
+    buttonForceActive TINYINT(1) NOT NULL DEFAULT 0,
     publishedAt DATETIME(3) NULL,
     createdById VARCHAR(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
     createdAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
@@ -118,6 +119,7 @@ const statements = [
     CONSTRAINT watch_party_invites_inviterId_fkey FOREIGN KEY (inviterId) REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE,
     CONSTRAINT watch_party_invites_inviteeId_fkey FOREIGN KEY (inviteeId) REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+  `ALTER TABLE watch_party_rooms ADD COLUMN buttonForceActive TINYINT(1) NOT NULL DEFAULT 0`,
 ];
 
 async function main() {

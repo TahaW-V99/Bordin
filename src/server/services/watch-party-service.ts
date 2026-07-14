@@ -7,6 +7,8 @@ import { translateMatchTeamsToFa } from "@/shared/lib/football-names-fa";
 import { deductCoinsWithType } from "@/server/services/wallet-service";
 import { createNotification } from "@/server/services/notification-service";
 import { sendTransactionalSms } from "@/server/services/sms-service";
+import { buildSmsIrTemplatePayload } from "@/server/config/sms-config";
+import { smsWatchPartyInvite } from "@/shared/constants/sms-templates";
 import { getWatchPartyUiPhase, canSendWatchPartyInvite } from "@/shared/lib/watch-party-timing";
 import { ONLINE_PRESENCE_MS } from "@/shared/constants/watch-party";
 
@@ -20,6 +22,7 @@ const WATCH_PARTY_SCHEMA_DDL = [
     capacity INT NOT NULL,
     entryFeeCoins INT NOT NULL,
     isPublished TINYINT(1) NOT NULL DEFAULT 0,
+    buttonForceActive TINYINT(1) NOT NULL DEFAULT 0,
     publishedAt DATETIME(3) NULL,
     createdById VARCHAR(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
     createdAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
@@ -112,6 +115,7 @@ export type WatchPartyRoomDto = {
   capacity: number;
   entryFeeCoins: number;
   isPublished: boolean;
+  buttonForceActive: boolean;
   publishedAt: string | null;
   occupiedCount: number;
   match: {
@@ -129,6 +133,7 @@ export type WatchPartyPublicDto = {
   entryFeeCoins: number;
   occupiedCount: number;
   hasJoined: boolean;
+  buttonForceActive: boolean;
   uiPhase: "hidden" | "upcoming" | "active";
   googleMeetUrl: string | null;
 };
@@ -174,6 +179,7 @@ function serializeRoom(
     capacity: number;
     entryFeeCoins: number;
     isPublished: boolean;
+    buttonForceActive: boolean;
     publishedAt: Date | null;
     match: {
       homeTeamName: string;
@@ -192,6 +198,7 @@ function serializeRoom(
     capacity: room.capacity,
     entryFeeCoins: room.entryFeeCoins,
     isPublished: room.isPublished,
+    buttonForceActive: room.buttonForceActive,
     publishedAt: room.publishedAt?.toISOString() ?? null,
     occupiedCount: room._count?.entries ?? 0,
     match: {
@@ -365,7 +372,9 @@ export async function getWatchPartyMapForMatchIds(
   }
 
   for (const room of rooms) {
-    const uiPhase = getWatchPartyUiPhase(room.match.kickoffAt);
+    const uiPhase = getWatchPartyUiPhase(room.match.kickoffAt, Date.now(), {
+      forceActive: room.buttonForceActive,
+    });
     if (uiPhase === "hidden") continue;
 
     const hasJoined = room.entries.length > 0;
@@ -376,6 +385,7 @@ export async function getWatchPartyMapForMatchIds(
       entryFeeCoins: room.entryFeeCoins,
       occupiedCount: room._count.entries,
       hasJoined,
+      buttonForceActive: room.buttonForceActive,
       uiPhase,
       googleMeetUrl: hasJoined ? room.googleMeetUrl : null,
     });
@@ -397,7 +407,9 @@ export async function getWatchPartyStatusForUser(userId: string, matchId: string
   });
   if (!room) return null;
 
-  const uiPhase = getWatchPartyUiPhase(room.match.kickoffAt);
+  const uiPhase = getWatchPartyUiPhase(room.match.kickoffAt, Date.now(), {
+    forceActive: room.buttonForceActive,
+  });
   if (uiPhase === "hidden") return null;
 
   const hasJoined = room.entries.length > 0;
@@ -408,6 +420,7 @@ export async function getWatchPartyStatusForUser(userId: string, matchId: string
     entryFeeCoins: room.entryFeeCoins,
     occupiedCount: room._count.entries,
     hasJoined,
+    buttonForceActive: room.buttonForceActive,
     isFull: room._count.entries >= room.capacity,
     uiPhase,
     googleMeetUrl: hasJoined ? room.googleMeetUrl : null,
@@ -434,7 +447,9 @@ export async function joinWatchParty(userId: string, roomId: string) {
   });
   if (!room?.isPublished) throw new Error("اتاق یافت نشد");
 
-  const uiPhase = getWatchPartyUiPhase(room.match.kickoffAt);
+  const uiPhase = getWatchPartyUiPhase(room.match.kickoffAt, Date.now(), {
+    forceActive: room.buttonForceActive,
+  });
   if (uiPhase !== "active") throw new Error("هنوز زمان ورود به اتاق فرا نرسیده");
 
   if (room.entries.length > 0) {
@@ -539,7 +554,9 @@ export async function inviteUsersToWatchParty(
   if (!inviter) throw new Error("کاربر یافت نشد");
 
   const inviterName = inviter.profile?.displayName?.trim() || inviter.phone;
-  const matchLabel = `${room.match.homeTeamName} - ${room.match.awayTeamName}`;
+  const translatedMatch = translateMatchTeamsToFa(room.match);
+  const matchTitle = `${translatedMatch.homeTeamName} - ${translatedMatch.awayTeamName}`;
+  const matchLabel = matchTitle;
   const link = `/home?watchParty=${room.matchId}`;
 
   let pushSent = 0;
@@ -555,7 +572,6 @@ export async function inviteUsersToWatchParty(
         },
       },
     });
-    if (existingInvite?.pushSentAt) continue;
 
     const invitee = await prisma.user.findUnique({
       where: { id: inviteeId, isActive: true },
@@ -584,9 +600,15 @@ export async function inviteUsersToWatchParty(
     pushSent += 1;
 
     if (!existingInvite?.smsSentAt) {
-      const smsBody = `بدو بدو! ${inviterName} برای تماشای زنده و گروهی مسابقه ${matchLabel} دعوتت کرده! تا ظرفیت تکمیل نشده، ملحق شو. https://bordin.ir/home`;
       try {
-        await sendTransactionalSms(invitee.phone, smsBody);
+        await sendTransactionalSms(
+          invitee.phone,
+          smsWatchPartyInvite(inviterName, matchTitle),
+          buildSmsIrTemplatePayload("watch_party_invite", {
+            name: inviterName,
+            title: matchTitle,
+          }),
+        );
         await prisma.watchPartyInvite.update({
           where: {
             roomId_inviterId_inviteeId: { roomId, inviterId, inviteeId },
@@ -632,6 +654,72 @@ export async function dismissWatchPartyInviteNotification(
   }
 
   return notification;
+}
+
+export async function updateWatchPartyRoom(
+  roomId: string,
+  input: {
+    googleMeetUrl?: string;
+    capacity?: number;
+    entryFeeCoins?: number;
+    buttonForceActive?: boolean;
+  },
+) {
+  if (await shouldUseMemoryDb()) {
+    throw new Error("watch party در حالت حافظه پشتیبانی نمی‌شود");
+  }
+  if (!(await ensureWatchPartySchema())) {
+    throw new Error("جداول Watch Party در دیتابیس آماده نیستند");
+  }
+
+  const existing = await prisma.watchPartyRoom.findUnique({ where: { id: roomId } });
+  if (!existing?.isPublished) throw new Error("اتاق یافت نشد");
+
+  const data: Prisma.WatchPartyRoomUpdateInput = {};
+  if (input.googleMeetUrl !== undefined) {
+    data.googleMeetUrl = normalizeMeetUrl(input.googleMeetUrl);
+  }
+  if (input.capacity !== undefined) {
+    const capacity = Math.floor(input.capacity);
+    if (capacity < 1 || capacity > 500) {
+      throw new Error("ظرفیت هر اتاق باید بین ۱ تا ۵۰۰ باشد");
+    }
+    data.capacity = capacity;
+  }
+  if (input.entryFeeCoins !== undefined) {
+    const entryFeeCoins = Math.floor(input.entryFeeCoins);
+    if (entryFeeCoins < 0) throw new Error("هزینه ورود نمی‌تواند منفی باشد");
+    data.entryFeeCoins = entryFeeCoins;
+  }
+  if (input.buttonForceActive !== undefined) {
+    data.buttonForceActive = input.buttonForceActive;
+  }
+
+  const room = await prisma.watchPartyRoom.update({
+    where: { id: roomId },
+    data,
+    include: {
+      match: true,
+      _count: { select: { entries: true } },
+    },
+  });
+
+  return serializeRoom(room);
+}
+
+export async function deleteWatchPartyRoom(roomId: string) {
+  if (await shouldUseMemoryDb()) {
+    throw new Error("watch party در حالت حافظه پشتیبانی نمی‌شود");
+  }
+  if (!(await ensureWatchPartySchema())) {
+    throw new Error("جداول Watch Party در دیتابیس آماده نیستند");
+  }
+
+  const existing = await prisma.watchPartyRoom.findUnique({ where: { id: roomId } });
+  if (!existing?.isPublished) throw new Error("اتاق یافت نشد");
+
+  await prisma.watchPartyRoom.delete({ where: { id: roomId } });
+  return { id: roomId };
 }
 
 export async function touchUserPresence(userId: string) {

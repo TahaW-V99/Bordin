@@ -4,6 +4,29 @@ import { useEffect } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "@/shared/lib/cn";
 
+let bodyScrollLockCount = 0;
+let bodyScrollLockPrevOverflow: string | null = null;
+
+function lockBodyScroll() {
+  if (bodyScrollLockCount === 0) {
+    bodyScrollLockPrevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+  }
+  bodyScrollLockCount += 1;
+}
+
+function unlockBodyScroll() {
+  if (bodyScrollLockCount <= 0) {
+    bodyScrollLockCount = 0;
+    return;
+  }
+  bodyScrollLockCount -= 1;
+  if (bodyScrollLockCount === 0) {
+    document.body.style.overflow = bodyScrollLockPrevOverflow ?? "";
+    bodyScrollLockPrevOverflow = null;
+  }
+}
+
 type ModalProps = {
   open: boolean;
   onClose: () => void;
@@ -14,15 +37,14 @@ type ModalProps = {
 export function Modal({ open, onClose, children, className }: ModalProps) {
   useEffect(() => {
     if (!open) return;
+    lockBodyScroll();
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
     };
     document.addEventListener("keydown", onKeyDown);
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
     return () => {
       document.removeEventListener("keydown", onKeyDown);
-      document.body.style.overflow = prevOverflow;
+      unlockBodyScroll();
     };
   }, [open, onClose]);
 

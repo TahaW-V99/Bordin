@@ -10,6 +10,7 @@ import {
   WATCH_PARTY_FULL_MESSAGE,
   WATCH_PARTY_INSUFFICIENT_COINS,
   WATCH_PARTY_JOIN_DESCRIPTION,
+  WATCH_PARTY_REJOIN_DESCRIPTION,
 } from "@/shared/constants/watch-party";
 import { WatchPartyInviteModal } from "@/features/watch-party/components/watch-party-invite-modal";
 import type { WatchPartyCardState } from "@/features/watch-party/components/watch-party-button";
@@ -37,11 +38,16 @@ export function WatchPartyJoinModal({
   const [occupiedCount, setOccupiedCount] = useState(watchParty.occupiedCount);
 
   useEffect(() => {
+    if (!open) setInviteOpen(false);
+  }, [open]);
+
+  useEffect(() => {
     setOccupiedCount(watchParty.occupiedCount);
   }, [watchParty.occupiedCount]);
 
   const isFull = occupiedCount >= watchParty.capacity;
   const remaining = Math.max(0, watchParty.capacity - occupiedCount);
+  const hasJoined = watchParty.hasJoined;
 
   const refreshStatus = useCallback(async () => {
     const res = await fetch(`/api/watch-party/status?matchId=${watchParty.matchId}`, {
@@ -61,7 +67,12 @@ export function WatchPartyJoinModal({
     return () => clearInterval(id);
   }, [open, refreshStatus]);
 
-  const join = async () => {
+  const enterRoom = async () => {
+    if (hasJoined && watchParty.googleMeetUrl) {
+      window.location.href = watchParty.googleMeetUrl;
+      return;
+    }
+
     setLoading(true);
     try {
       const res = await fetch("/api/watch-party/join", {
@@ -89,6 +100,14 @@ export function WatchPartyJoinModal({
 
   const inviteCapacity = useMemo(() => remaining, [remaining]);
 
+  const description = hasJoined ? WATCH_PARTY_REJOIN_DESCRIPTION : WATCH_PARTY_JOIN_DESCRIPTION;
+
+  const joinButtonLabel = hasJoined
+    ? "وارد اتاق بشم"
+    : watchParty.entryFeeCoins > 0
+      ? `بزن بریم · ${formatPersianNumber(watchParty.entryFeeCoins)} سکه`
+      : "بزن بریم";
+
   return (
     <>
       <Modal open={open} onClose={onClose} className="max-w-md">
@@ -103,29 +122,48 @@ export function WatchPartyJoinModal({
             </span>
           </div>
 
-          {isFull ? (
+          {isFull && !hasJoined ? (
             <p className="text-center text-sm font-semibold text-red-400">{WATCH_PARTY_FULL_MESSAGE}</p>
           ) : (
-            <p className="text-sm leading-7 text-white/70">{WATCH_PARTY_JOIN_DESCRIPTION}</p>
+            <p className="text-sm leading-7 text-white/70">{description}</p>
           )}
 
           <div className="flex flex-col gap-2">
-            <Button fullWidth loading={loading} disabled={isFull} onClick={() => void join()}>
-              {watchParty.entryFeeCoins > 0
-                ? `بزن بریم · ${formatPersianNumber(watchParty.entryFeeCoins)} سکه`
-                : "بزن بریم"}
-            </Button>
-            <Button fullWidth variant="secondary" onClick={onClose}>
-              بعدا میام
-            </Button>
-            <Button
-              fullWidth
-              variant="secondary"
-              disabled={isFull || inviteCapacity === 0}
-              onClick={() => setInviteOpen(true)}
-            >
-              دعوت از دوستان
-            </Button>
+            {hasJoined ? (
+              <>
+                <Button fullWidth loading={loading} disabled={isFull} onClick={() => void enterRoom()}>
+                  وارد اتاق بشم
+                </Button>
+                <Button
+                  fullWidth
+                  variant="secondary"
+                  disabled={isFull || inviteCapacity === 0}
+                  onClick={() => setInviteOpen(true)}
+                >
+                  دعوت از دوستان
+                </Button>
+                <Button fullWidth variant="secondary" onClick={onClose}>
+                  بعدا میام
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button fullWidth loading={loading} disabled={isFull} onClick={() => void enterRoom()}>
+                  {joinButtonLabel}
+                </Button>
+                <Button fullWidth variant="secondary" onClick={onClose}>
+                  بعدا میام
+                </Button>
+                <Button
+                  fullWidth
+                  variant="secondary"
+                  disabled={isFull || inviteCapacity === 0}
+                  onClick={() => setInviteOpen(true)}
+                >
+                  دعوت از دوستان
+                </Button>
+              </>
+            )}
           </div>
         </div>
       </Modal>

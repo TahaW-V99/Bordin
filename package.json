@@ -48,6 +48,7 @@
     "grant-admin:direct": "node scripts/grant-admin-direct.mjs",
     "grant:production:users": "liara shell --app bordin --command \"node prisma/apply-production-user-grants.mjs\"",
     "grant:production:mohammad1": "liara shell --app bordin --command \"node prisma/grant-user-single.mjs\"",
+    "announce:watch-party:production": "liara shell --app bordin --command \"node prisma/send-watch-party-announcement.mjs\"",
     "grant:production:users:push": "node scripts/push-grant-script-to-liara.mjs",
     "update:prediction:production": "liara shell --app bordin --command \"node prisma/update-daily-prediction.mjs\"",
     "db:seed": "tsx prisma/seed.ts",

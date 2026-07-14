@@ -138,7 +138,7 @@ async function loadUpcomingCatalogMatches(daysAhead = 30): Promise<CatalogMatch[
       const leagueName = normalized.leagueName ?? "سایر";
       return {
         competitionId: match.competition?.id ?? leagueNameToCompetitionId(leagueName),
-        competitionName: match.competition?.name ?? leagueName,
+        competitionName: leagueName,
         externalId: normalized.externalId,
         apiMatchId: match.id,
         homeTeamName: normalized.homeTeamName,
@@ -227,7 +227,7 @@ function catalogMatchFromApi(match: FixtureMatch): CatalogMatch {
   const leagueName = normalized.leagueName ?? "سایر";
   return {
     competitionId: match.competition?.id ?? leagueNameToCompetitionId(leagueName),
-    competitionName: match.competition?.name ?? leagueName,
+    competitionName: leagueName,
     externalId: normalized.externalId,
     apiMatchId: match.id,
     homeTeamName: normalized.homeTeamName,

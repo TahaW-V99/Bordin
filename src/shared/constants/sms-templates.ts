@@ -28,3 +28,7 @@ export function smsAdminWithdrawalAlert(name: string, amountToman: number) {
   const amount = formatSmsAmount(amountToman);
   return `کاربر ${name} درخواست دریافت وجه به مبلغ ${amount} دارد.`;
 }
+
+export function smsWatchPartyInvite(inviterName: string, matchTitle: string) {
+  return `اطلاع‌رسانی بُردین\nشما برای دیدن مسابقه ${matchTitle} توسط ${inviterName} اضافه شده‌اید.\nمشاهده جزئیات:\nhttps://bordin.ir/home`;
+}
