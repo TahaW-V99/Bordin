@@ -70,13 +70,12 @@ function runLiaraShellRecover(app) {
 }
 
 function printProductionHelp() {
-  console.error("\n❌ Production recover cannot use http-push from your PC (server DB pool errors).\n");
-  console.error("Use one of these:");
-  console.error("  1. npm run recover:kandakator:production");
-  console.error("     → runs inside Liara shell with internal DATABASE_URL (recommended)");
-  console.error("  2. Create .env.production.local with public MySQL URL from Liara panel");
-  console.error("     → Databases → bordindb → Public Network (see .env.production.local.example)");
-  console.error("     → then run npm run recover:kandakator:production again\n");
+  console.error("\n❌ Production recover failed.\n");
+  console.error("Use:");
+  console.error("  npm run recover:kandakator:production");
+  console.error("     → Liara shell with internal DATABASE_URL (default)");
+  console.error("  npm run recover:kandakator:production -- --local-db");
+  console.error("     → direct MySQL from PC (.env.production.local public URL)\n");
 }
 
 const targetArg = process.argv[2];
@@ -88,6 +87,24 @@ if (target === "staging") {
   process.exit(result.status ?? 1);
 }
 
+const useLocalDb = process.argv.includes("--local-db");
+
+if (!useLocalDb) {
+  const liara = spawnSync("liara", ["--version"], { shell: true, encoding: "utf8" });
+  if (liara.status !== 0) {
+    printProductionHelp();
+    process.exit(1);
+  }
+
+  const result = runLiaraShellRecover(PRODUCTION_APP);
+  const exitCode = result.status ?? 1;
+  if (exitCode !== 0) {
+    console.error("\nLiara shell recover failed. Deploy latest code first: npm run deploy:production");
+    printProductionHelp();
+  }
+  process.exit(exitCode);
+}
+
 const merged = {
   ...parseEnvFile(".env"),
   ...parseEnvFile(".env.staging"),
@@ -96,7 +113,7 @@ const merged = {
 const databaseUrl = merged.DATABASE_URL?.trim() ?? "";
 
 if (!databaseUrl) {
-  console.error("DATABASE_URL not found. Check .env or .env.production.local.");
+  console.error("DATABASE_URL not found. Check .env.production.local for --local-db mode.");
   process.exit(1);
 }
 

@@ -432,5 +432,6 @@ export async function getKandakatorForDate(userId: string, dateKey?: string) {
     return null;
   }
 
+  void settleKandakatorFinishedMatches(kandakator.id).catch(() => {});
   return buildKandakatorDto(userId, targetKey, kandakator);
 }

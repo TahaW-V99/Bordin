@@ -1,5 +1,5 @@
 import { addDays } from "date-fns";
-import { CoinTransactionType, NotificationType } from "@prisma/client";
+import { CoinTransactionType, NotificationType, Prisma } from "@prisma/client";
 import { prisma } from "@/shared/lib/prisma";
 import { shouldUseMemoryDb } from "@/server/db";
 import { serializeKickoffAt } from "@/shared/lib/dates";
@@ -9,6 +9,91 @@ import { createNotification } from "@/server/services/notification-service";
 import { sendTransactionalSms } from "@/server/services/sms-service";
 import { getWatchPartyUiPhase, canSendWatchPartyInvite } from "@/shared/lib/watch-party-timing";
 import { ONLINE_PRESENCE_MS } from "@/shared/constants/watch-party";
+
+let watchPartyTableReady: boolean | null = null;
+
+const WATCH_PARTY_SCHEMA_DDL = [
+  `CREATE TABLE IF NOT EXISTS watch_party_rooms (
+    id VARCHAR(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+    matchId VARCHAR(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+    googleMeetUrl TEXT NOT NULL,
+    capacity INT NOT NULL,
+    entryFeeCoins INT NOT NULL,
+    isPublished TINYINT(1) NOT NULL DEFAULT 0,
+    publishedAt DATETIME(3) NULL,
+    createdById VARCHAR(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
+    createdAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updatedAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    PRIMARY KEY (id),
+    UNIQUE KEY watch_party_rooms_matchId_key (matchId),
+    KEY watch_party_rooms_isPublished_idx (isPublished),
+    CONSTRAINT watch_party_rooms_matchId_fkey FOREIGN KEY (matchId) REFERENCES football_matches(id) ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT watch_party_rooms_createdById_fkey FOREIGN KEY (createdById) REFERENCES users(id) ON DELETE SET NULL ON UPDATE CASCADE
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+  `CREATE TABLE IF NOT EXISTS watch_party_entries (
+    id VARCHAR(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+    roomId VARCHAR(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+    userId VARCHAR(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+    paidCoins INT NOT NULL,
+    joinedAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    PRIMARY KEY (id),
+    UNIQUE KEY watch_party_entries_roomId_userId_key (roomId, userId),
+    KEY watch_party_entries_roomId_idx (roomId),
+    KEY watch_party_entries_userId_idx (userId),
+    CONSTRAINT watch_party_entries_roomId_fkey FOREIGN KEY (roomId) REFERENCES watch_party_rooms(id) ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT watch_party_entries_userId_fkey FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+  `CREATE TABLE IF NOT EXISTS watch_party_invites (
+    id VARCHAR(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+    roomId VARCHAR(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+    inviterId VARCHAR(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+    inviteeId VARCHAR(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+    pushSentAt DATETIME(3) NULL,
+    smsSentAt DATETIME(3) NULL,
+    dismissedAt DATETIME(3) NULL,
+    createdAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    PRIMARY KEY (id),
+    UNIQUE KEY watch_party_invites_roomId_inviterId_inviteeId_key (roomId, inviterId, inviteeId),
+    KEY watch_party_invites_inviteeId_dismissedAt_idx (inviteeId, dismissedAt),
+    CONSTRAINT watch_party_invites_roomId_fkey FOREIGN KEY (roomId) REFERENCES watch_party_rooms(id) ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT watch_party_invites_inviterId_fkey FOREIGN KEY (inviterId) REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT watch_party_invites_inviteeId_fkey FOREIGN KEY (inviteeId) REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+];
+
+async function hasWatchPartyTable() {
+  if (watchPartyTableReady !== null) return watchPartyTableReady;
+  if (await shouldUseMemoryDb()) {
+    watchPartyTableReady = false;
+    return false;
+  }
+
+  const rows = await prisma.$queryRaw<Array<{ cnt: bigint }>>`
+    SELECT COUNT(*) AS cnt
+    FROM information_schema.tables
+    WHERE table_schema = DATABASE()
+      AND table_name = 'watch_party_rooms'
+  `;
+  watchPartyTableReady = Number(rows[0]?.cnt ?? 0) > 0;
+  return watchPartyTableReady;
+}
+
+async function ensureWatchPartySchema() {
+  if (await shouldUseMemoryDb()) return false;
+  if (await hasWatchPartyTable()) return true;
+
+  try {
+    for (const sql of WATCH_PARTY_SCHEMA_DDL) {
+      await prisma.$executeRawUnsafe(sql);
+    }
+    watchPartyTableReady = true;
+    return true;
+  } catch (error) {
+    console.error("[Bordin:watch-party] schema ensure failed:", error);
+    watchPartyTableReady = false;
+    return false;
+  }
+}
 
 export type AdminKandakatorMatchOption = {
   matchId: string;
@@ -62,6 +147,13 @@ type PublishRoomInput = {
   entryFeeCoins: number;
 };
 
+function isWatchPartySchemaMissing(error: unknown) {
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    (error.code === "P2021" || error.code === "P1014")
+  );
+}
+
 function normalizeMeetUrl(url: string) {
   const trimmed = url.trim();
   if (!trimmed) throw new Error("لینک گوگل میت الزامی است");
@@ -114,8 +206,11 @@ function serializeRoom(
 export async function listUpcomingKandakatorMatchesForAdmin() {
   if (await shouldUseMemoryDb()) return [];
 
+  await ensureWatchPartySchema();
+
   const now = new Date();
   const weekEnd = addDays(now, 7);
+  const tableReady = await hasWatchPartyTable();
 
   const rows = await prisma.kandakatorMatch.findMany({
     where: {
@@ -126,17 +221,23 @@ export async function listUpcomingKandakatorMatchesForAdmin() {
       },
     },
     include: {
-      match: {
-        include: {
-          watchPartyRoom: { select: { id: true, isPublished: true } },
-        },
-      },
+      match: tableReady
+        ? {
+            include: {
+              watchPartyRoom: { select: { id: true, isPublished: true } },
+            },
+          }
+        : true,
     },
     orderBy: { match: { kickoffAt: "asc" } },
   });
 
   return rows.map((row) => {
     const translated = translateMatchTeamsToFa(row.match);
+    const watchPartyRoom =
+      tableReady && "watchPartyRoom" in row.match
+        ? (row.match as { watchPartyRoom?: { isPublished: boolean } | null }).watchPartyRoom
+        : null;
     return {
       matchId: row.matchId,
       kandakatorMatchId: row.id,
@@ -144,23 +245,29 @@ export async function listUpcomingKandakatorMatchesForAdmin() {
       awayTeamName: translated.awayTeamName,
       leagueName: translated.leagueName?.trim() || "سایر مسابقات",
       kickoffAt: serializeKickoffAt(row.match.kickoffAt),
-      hasPublishedRoom: Boolean(row.match.watchPartyRoom?.isPublished),
+      hasPublishedRoom: Boolean(watchPartyRoom?.isPublished),
     } satisfies AdminKandakatorMatchOption;
   });
 }
 
 export async function listAdminWatchPartyRooms() {
   if (await shouldUseMemoryDb()) return [];
+  if (!(await ensureWatchPartySchema())) return [];
 
-  const rooms = await prisma.watchPartyRoom.findMany({
-    include: {
-      match: true,
-      _count: { select: { entries: true } },
-    },
-    orderBy: { match: { kickoffAt: "asc" } },
-  });
+  try {
+    const rooms = await prisma.watchPartyRoom.findMany({
+      include: {
+        match: true,
+        _count: { select: { entries: true } },
+      },
+      orderBy: { match: { kickoffAt: "asc" } },
+    });
 
-  return rooms.map(serializeRoom);
+    return rooms.map(serializeRoom);
+  } catch (error) {
+    if (isWatchPartySchemaMissing(error)) return [];
+    throw error;
+  }
 }
 
 export async function publishWatchPartyRooms(
@@ -169,6 +276,10 @@ export async function publishWatchPartyRooms(
 ) {
   if (await shouldUseMemoryDb()) {
     throw new Error("watch party در حالت حافظه پشتیبانی نمی‌شود");
+  }
+
+  if (!(await ensureWatchPartySchema())) {
+    throw new Error("جداول Watch Party در دیتابیس آماده نیستند");
   }
 
   if (rooms.length === 0) throw new Error("حداقل یک مسابقه انتخاب کنید");
@@ -230,22 +341,28 @@ export async function getWatchPartyMapForMatchIds(
   matchIds: string[],
 ): Promise<Map<string, WatchPartyPublicDto>> {
   const map = new Map<string, WatchPartyPublicDto>();
-  if (matchIds.length === 0 || (await shouldUseMemoryDb())) return map;
+  if (matchIds.length === 0 || !(await ensureWatchPartySchema())) return map;
 
-  const rooms = await prisma.watchPartyRoom.findMany({
-    where: {
-      matchId: { in: matchIds },
-      isPublished: true,
-    },
-    include: {
-      match: true,
-      entries: {
-        where: { userId },
-        select: { id: true },
+  let rooms;
+  try {
+    rooms = await prisma.watchPartyRoom.findMany({
+      where: {
+        matchId: { in: matchIds },
+        isPublished: true,
       },
-      _count: { select: { entries: true } },
-    },
-  });
+      include: {
+        match: true,
+        entries: {
+          where: { userId },
+          select: { id: true },
+        },
+        _count: { select: { entries: true } },
+      },
+    });
+  } catch (error) {
+    if (isWatchPartySchemaMissing(error)) return map;
+    throw error;
+  }
 
   for (const room of rooms) {
     const uiPhase = getWatchPartyUiPhase(room.match.kickoffAt);

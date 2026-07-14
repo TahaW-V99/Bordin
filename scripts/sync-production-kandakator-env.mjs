@@ -47,8 +47,9 @@ if (!pushToken || !apiKey) {
 const pairs = [
   `KANDAKATOR_SYNC_PUSH_TOKEN=${pushToken}`,
   `FIXTURE_API_KEY=${apiKey}`,
+  `FIXTURE_API_BASE_URL=${staging.FIXTURE_API_BASE_URL?.trim() || "https://api.v1.victoryapi.ir"}`,
   "KANDAKATOR_RUNTIME_SYNC=true",
-  "FIXTURE_API_FETCH_TIMEOUT_MS=15000",
+  "FIXTURE_API_FETCH_TIMEOUT_MS=45000",
 ];
 
 console.log(`Setting kandakator env on Liara app "${PRODUCTION_APP}"...`);

@@ -1,15 +1,16 @@
 /**
- * Fixture API (API-Football / api-sports.io v3)
- * Auth: x-apisports-key
- * Docs: https://www.api-football.com/documentation-v3
+ * Fixture API — VictoryAPI (https://victoryapi.ir)
+ * Docs: https://victoryapi.ir/Home/Documentation
+ * Auth: x-vapi-key
  */
 
+import { addDays, differenceInCalendarDays, parseISO } from "date-fns";
 import { fromZonedTime } from "date-fns-tz";
 import { TEHRAN_TZ } from "@/shared/lib/dates";
 
-const DEFAULT_API_BASE = "https://v3.football.api-sports.io";
+const DEFAULT_API_BASE = "https://api.v1.victoryapi.ir";
 
-type ApiFootballFixture = {
+type ApiFixture = {
   fixture: {
     id: number;
     date: string;
@@ -27,8 +28,8 @@ type ApiFootballFixture = {
   };
 };
 
-type ApiFootballFixturesResponse = {
-  response?: ApiFootballFixture[];
+type ApiFixturesResponse = {
+  response?: ApiFixture[] | Record<string, unknown>;
   errors?: Record<string, string> | string[];
 };
 
@@ -58,12 +59,21 @@ export function parseFixtureExternalId(externalId: string | null | undefined) {
   return Number.isFinite(id) ? id : null;
 }
 
-function getApiBase() {
-  return process.env.FIXTURE_API_BASE_URL?.trim() || DEFAULT_API_BASE;
+function normalizeApiKey(raw: string) {
+  const trimmed = raw.trim();
+  if (!trimmed) return "";
+  if (trimmed.includes(" ") && !trimmed.includes("+")) {
+    return trimmed.replace(/ /g, "+");
+  }
+  return trimmed;
 }
 
 function getApiKey() {
-  return process.env.FIXTURE_API_KEY?.trim() ?? "";
+  return normalizeApiKey(process.env.FIXTURE_API_KEY?.trim() ?? "");
+}
+
+function getApiBase() {
+  return (process.env.FIXTURE_API_BASE_URL?.trim() || DEFAULT_API_BASE).replace(/\/$/, "");
 }
 
 export function isFixtureApiConfigured() {
@@ -72,15 +82,15 @@ export function isFixtureApiConfigured() {
 
 function getFetchTimeoutMs(options?: { noCache?: boolean }) {
   const fromEnv = process.env.FIXTURE_API_FETCH_TIMEOUT_MS?.trim();
-  if (fromEnv) return Math.max(1000, Number(fromEnv) || 8000);
-  return options?.noCache ? 15_000 : 8_000;
+  if (fromEnv) return Math.max(1000, Number(fromEnv) || 45_000);
+  return options?.noCache ? 45_000 : 30_000;
 }
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function mapApiFixture(row: ApiFootballFixture): FixtureMatch {
+function mapApiFixture(row: ApiFixture): FixtureMatch {
   const short = row.fixture.status.short;
   const isFinished = ["FT", "AET", "PEN", "AWD", "WO"].includes(short);
   const regularHome = row.goals.home ?? row.score.halftime?.home ?? null;
@@ -102,6 +112,35 @@ function mapApiFixture(row: ApiFootballFixture): FixtureMatch {
   };
 }
 
+function parseApiErrors(json: ApiFixturesResponse | null) {
+  if (!json?.errors) return null;
+  if (Array.isArray(json.errors) && json.errors.length === 0) return null;
+  const message = Array.isArray(json.errors)
+    ? json.errors.join(", ")
+    : Object.values(json.errors).join(", ");
+  return message || null;
+}
+
+function normalizeApiFixtures(response: ApiFixturesResponse["response"]): ApiFixture[] {
+  return Array.isArray(response) ? response : [];
+}
+
+function parseApiJsonBody(raw: unknown): ApiFixturesResponse | null {
+  if (raw == null) return null;
+  if (typeof raw === "string") {
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (typeof parsed === "string") {
+        return JSON.parse(parsed) as ApiFixturesResponse;
+      }
+      return parsed as ApiFixturesResponse;
+    } catch {
+      return null;
+    }
+  }
+  return raw as ApiFixturesResponse;
+}
+
 async function fetchFixturesFromApi(
   params: Record<string, string>,
   options?: { noCache?: boolean },
@@ -116,27 +155,22 @@ async function fetchFixturesFromApi(
     url.searchParams.set(key, value);
   }
 
-  for (let attempt = 0; attempt < 4; attempt++) {
+  for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const res = await fetch(url.toString(), {
-        headers: {
-          "x-apisports-key": apiKey,
-        },
+        headers: { "x-vapi-key": apiKey },
         signal: AbortSignal.timeout(getFetchTimeoutMs(options)),
         ...(options?.noCache
           ? { cache: "no-store" as RequestCache }
           : { next: { revalidate: 300 } }),
       });
 
-      const json = (await res.json().catch(() => null)) as ApiFootballFixturesResponse | null;
+      const raw = await res.json().catch(() => null);
+      const json = parseApiJsonBody(raw);
+      const apiError = parseApiErrors(json);
 
       if (!res.ok) {
-        const message =
-          (typeof json?.errors === "object" && json?.errors
-            ? Object.values(json.errors).join(", ")
-            : Array.isArray(json?.errors)
-              ? json.errors.join(", ")
-              : null) ?? `Fixture API خطا: ${res.status}`;
+        const message = apiError ?? `Fixture API خطا: ${res.status}`;
         if (res.status === 429 || /rate limit/i.test(message)) {
           await sleep(15_000);
           continue;
@@ -144,14 +178,16 @@ async function fetchFixturesFromApi(
         throw new Error(message);
       }
 
-      return (json?.response ?? []).map(mapApiFixture);
+      if (apiError) throw new Error(apiError);
+
+      return normalizeApiFixtures(json?.response).map(mapApiFixture);
     } catch (error) {
       if (error instanceof Error && /fetch failed/i.test(error.message)) {
         throw new Error(
           "اتصال به سرویس مسابقات برقرار نشد. کلید API یا دسترسی اینترنت سرور را بررسی کنید.",
         );
       }
-      const isLast = attempt >= 3;
+      const isLast = attempt >= 2;
       if (isLast) throw error;
       await sleep(2_000 * (attempt + 1));
     }
@@ -160,8 +196,18 @@ async function fetchFixturesFromApi(
   throw new Error("Fixture API: rate limit exceeded after retries");
 }
 
+function enumerateDateKeys(dateFrom: string, dateTo: string) {
+  const start = parseISO(dateFrom);
+  const end = parseISO(dateTo);
+  const dayCount = Math.max(0, differenceInCalendarDays(end, start));
+  return Array.from({ length: dayCount + 1 }, (_, index) => {
+    const date = addDays(start, index);
+    return date.toISOString().slice(0, 10);
+  });
+}
+
 export async function fetchMatchesByDate(date: string, options?: { noCache?: boolean }) {
-  return fetchFixturesFromApi({ date, timezone: TEHRAN_TZ }, options);
+  return fetchFixturesFromApi({ date }, options);
 }
 
 export async function fetchMatchesInRange(
@@ -169,9 +215,23 @@ export async function fetchMatchesInRange(
   dateTo: string,
   options?: { noCache?: boolean },
 ) {
-  return fetchFixturesFromApi(
-    { from: dateFrom, to: dateTo, timezone: TEHRAN_TZ },
-    options,
+  const dates = enumerateDateKeys(dateFrom, dateTo);
+  if (dates.length === 0) return [];
+
+  const seen = new Set<number>();
+  const merged: FixtureMatch[] = [];
+
+  for (const date of dates) {
+    const dayMatches = await fetchMatchesByDate(date, options);
+    for (const match of dayMatches) {
+      if (seen.has(match.id)) continue;
+      seen.add(match.id);
+      merged.push(match);
+    }
+  }
+
+  return merged.sort(
+    (a, b) => new Date(a.utcDate).getTime() - new Date(b.utcDate).getTime(),
   );
 }
 
@@ -200,10 +260,16 @@ export async function fetchMatchesForTehranDate(
 export function mapFixtureStatus(
   status: string,
 ): "SCHEDULED" | "LIVE" | "FINISHED" | "CANCELLED" | "POSTPONED" {
-  if (["FT", "AET", "PEN", "AWD", "WO"].includes(status)) return "FINISHED";
-  if (["1H", "2H", "HT", "ET", "BT", "LIVE", "P"].includes(status)) return "LIVE";
-  if (["CANC", "ABD"].includes(status)) return "CANCELLED";
-  if (["PST", "SUSP", "INT", "TBD"].includes(status)) return "POSTPONED";
+  if (["FINISHED", "AWARDED", "FT", "AET", "PEN", "AWD", "WO"].includes(status)) {
+    return "FINISHED";
+  }
+  if (["IN_PLAY", "PAUSED", "LIVE", "1H", "2H", "HT", "ET", "BT", "P"].includes(status)) {
+    return "LIVE";
+  }
+  if (["CANCELLED", "SUSPENDED", "CANC", "ABD"].includes(status)) return "CANCELLED";
+  if (["POSTPONED", "DELAYED", "PST", "SUSP", "INT", "TBD"].includes(status)) {
+    return "POSTPONED";
+  }
   return "SCHEDULED";
 }
 

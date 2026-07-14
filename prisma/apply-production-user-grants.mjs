@@ -295,9 +295,52 @@ async function summarizeUser(prisma, userId) {
   };
 }
 
+function parseSingleGrantArgs() {
+  const args = process.argv.slice(2);
+  const singleIndex = args.indexOf("--single");
+  if (singleIndex === -1) return null;
+
+  const displayName = args[singleIndex + 1];
+  if (!displayName) throw new Error("Usage: --single <displayName> [--sellable N] [--points N]");
+
+  const readNumberFlag = (flag) => {
+    const index = args.indexOf(flag);
+    if (index === -1) return 0;
+    const value = Number(args[index + 1]);
+    if (!Number.isFinite(value) || value < 0) {
+      throw new Error(`Invalid value for ${flag}`);
+    }
+    return value;
+  };
+
+  return {
+    displayName,
+    sellableCoins: readNumberFlag("--sellable"),
+    systemCoins: readNumberFlag("--system"),
+    points: readNumberFlag("--points"),
+  };
+}
+
 async function main() {
   const prisma = createPrisma();
+  const singleArgs = parseSingleGrantArgs();
   const results = [];
+
+  if (singleArgs) {
+    console.log(`Applying single grant for ${singleArgs.displayName}...`);
+    try {
+      const result = await applyUserGrant(prisma, singleArgs);
+      results.push({ ok: true, type: "user", ...result });
+      console.log(JSON.stringify(result, null, 2));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      results.push({ ok: false, type: "user", displayName: singleArgs.displayName, error: message });
+      console.error(`FAILED ${singleArgs.displayName}: ${message}`);
+    }
+    await prisma.$disconnect();
+    if (results.some((r) => !r.ok)) process.exitCode = 1;
+    return;
+  }
 
   for (const target of USER_TARGETS) {
     console.log(`Applying user grants for ${target.displayName}...`);

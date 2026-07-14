@@ -43,14 +43,18 @@ function sleep(ms: number) {
 }
 
 export function loadRecoverKandakatorEnv(options: RecoverKandakatorOptions) {
-  const envFiles =
-    options.target === "production"
-      ? [".env", ".env.staging", ".env.production.local"]
-      : [".env.staging", ".env.staging.local"];
+  const onServer = options.onServer === true;
 
-  const merged = mergeEnvFiles(envFiles);
-  for (const [key, value] of Object.entries(merged)) {
-    if (value) process.env[key] = value;
+  if (!onServer) {
+    const envFiles =
+      options.target === "production"
+        ? [".env", ".env.staging", ".env.production.local"]
+        : [".env.staging", ".env.staging.local"];
+
+    const merged = mergeEnvFiles(envFiles);
+    for (const [key, value] of Object.entries(merged)) {
+      if (value) process.env[key] = value;
+    }
   }
 
   process.env.DEV_MEMORY_DB = "false";
@@ -67,7 +71,6 @@ export function loadRecoverKandakatorEnv(options: RecoverKandakatorOptions) {
 
   const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
   const hasInternalDbUrl = INTERNAL_DB_HOSTS.some((host) => databaseUrl.includes(`@${host}`));
-  const onServer = options.onServer === true;
   const canUseLocalDb = onServer || (Boolean(databaseUrl) && !hasInternalDbUrl);
   const allowHttpPush = options.target === "staging" && !canUseLocalDb;
 
