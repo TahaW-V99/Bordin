@@ -106,7 +106,9 @@ function mapApiFixture(row: ApiFixture): FixtureMatch {
     awayTeam: { id: row.teams.away.id, name: row.teams.away.name },
     competition: { id: row.league.id, name: row.league.name },
     score: {
-      fullTime: isFinished ? { home: fullHome, away: fullAway } : undefined,
+      fullTime: isFinished
+        ? { home: fullHome ?? regularHome, away: fullAway ?? regularAway }
+        : undefined,
       regularTime: { home: regularHome, away: regularAway },
     },
   };
@@ -294,6 +296,9 @@ export function readMatchScore(match: FixtureMatch) {
   if (isFinished) {
     if (hasScorePair(fullTime)) {
       return { homeScore: fullTime!.home, awayScore: fullTime!.away };
+    }
+    if (hasScorePair(regularTime)) {
+      return { homeScore: regularTime!.home, awayScore: regularTime!.away };
     }
     return { homeScore: null, awayScore: null };
   }

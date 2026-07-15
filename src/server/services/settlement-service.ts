@@ -25,13 +25,19 @@ import { derivePredictionCategory } from "@/shared/lib/match-lifecycle";
 async function ensureMatchFinishedForSettlement(matchId: string) {
   if (await shouldUseMemoryDb()) {
     const match = devMemoryDb.kandakator.findMatchById(matchId);
-    if (!match || !isMatchResultKnown(match)) return null;
+    if (!match) return null;
+    const hasScores = match.homeScore !== null && match.awayScore !== null;
+    if (!hasScores) return null;
     if (match.status !== "FINISHED") match.status = "FINISHED";
     return match;
   }
 
   const match = await prisma.footballMatch.findUnique({ where: { id: matchId } });
-  if (!match || !isMatchResultKnown(match)) return null;
+  if (!match) return null;
+
+  const hasScores = match.homeScore !== null && match.awayScore !== null;
+  if (!hasScores) return null;
+  if (match.status === "CANCELLED" || match.status === "POSTPONED") return null;
 
   if (match.status !== "FINISHED") {
     return prisma.footballMatch.update({
@@ -619,9 +625,9 @@ export async function rescoreAllFinishedMatchPredictions() {
 
   const matches = await prisma.footballMatch.findMany({
     where: {
-      status: "FINISHED",
       homeScore: { not: null },
       awayScore: { not: null },
+      status: { notIn: ["CANCELLED", "POSTPONED"] },
     },
     select: { id: true },
   });

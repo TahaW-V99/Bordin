@@ -17,7 +17,7 @@ describe("readMatchScore", () => {
     expect(score).toEqual({ homeScore: 2, awayScore: 0 });
   });
 
-  it("does not fall back to regularTime for FINISHED without fullTime", () => {
+  it("falls back to regularTime for FINISHED when fullTime is missing", () => {
     const score = readMatchScore({
       id: 1,
       utcDate: "2026-07-01T00:00:00Z",
@@ -28,7 +28,7 @@ describe("readMatchScore", () => {
         regularTime: { home: 1, away: 0 },
       },
     });
-    expect(score).toEqual({ homeScore: null, awayScore: null });
+    expect(score).toEqual({ homeScore: 1, awayScore: 0 });
   });
 
   it("uses regularTime for in-play matches", () => {
