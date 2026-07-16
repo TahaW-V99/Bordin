@@ -148,23 +148,9 @@ export function resolveSocialShareOrigin(request?: Pick<Request, "headers">): st
 }
 
 /**
- * Store "sell coins" tab on bordin.ir.
- * Override with STORE_SELL_ENABLED=false in Liara env to hide again.
+ * Store "sell coins" tab — hidden unless STORE_SELL_ENABLED=true in env.
  */
-const STORE_SELL_ON_BORDIN_IR_DEFAULT = true;
-
-export function isStoreSellTabVisibleForHost(hostname?: string): boolean {
+export function isStoreSellTabVisibleForHost(_hostname?: string): boolean {
   const env = process.env.STORE_SELL_ENABLED?.trim().toLowerCase();
-  if (env === "true" || env === "1") return true;
-  if (env === "false" || env === "0") return false;
-
-  if (hostname?.trim()) {
-    if (isBordinIrHost(hostname)) return STORE_SELL_ON_BORDIN_IR_DEFAULT;
-    return true;
-  }
-
-  if (isProductionEnvironment() && !isStagingEnvironment()) {
-    return STORE_SELL_ON_BORDIN_IR_DEFAULT;
-  }
-  return true;
+  return env === "true" || env === "1";
 }

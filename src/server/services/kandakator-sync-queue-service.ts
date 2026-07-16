@@ -1,12 +1,65 @@
-import { SyncJobStatus, type Prisma } from "@prisma/client";
+import { SyncJobStatus, Prisma } from "@prisma/client";
 import { addMinutes } from "date-fns";
 import { prisma } from "@/shared/lib/prisma";
 import { shouldUseMemoryDb } from "@/server/db";
 import { recordKandakatorSync } from "@/server/services/kandakator-sync-health";
+import { evaluateDateSyncNeed } from "@/server/services/kandakator-sync-policy";
 
 const DEFAULT_MAX_ATTEMPTS = 5;
 const RETRY_DELAYS_MINUTES = [1, 3, 10, 30, 60];
 const STALE_LOCK_MINUTES = 10;
+const ACTIVE_JOB_STATUSES: SyncJobStatus[] = [
+  SyncJobStatus.PENDING,
+  SyncJobStatus.PROCESSING,
+  SyncJobStatus.FAILED,
+];
+
+function isPrismaUniqueConstraintError(error: unknown) {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
+}
+
+async function findActiveSyncJob(dateKey: string) {
+  return prisma.kandakatorSyncJob.findFirst({
+    where: {
+      dateKey,
+      status: { in: ACTIVE_JOB_STATUSES },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+}
+
+async function createActiveSyncJob(input: EnqueueSyncJobInput) {
+  try {
+    return await prisma.kandakatorSyncJob.create({
+      data: {
+        dateKey: input.dateKey,
+        activeDateKey: input.dateKey,
+        source: input.source,
+        requestedBy: input.requestedBy,
+        payload: input.payload,
+        maxAttempts: DEFAULT_MAX_ATTEMPTS,
+      },
+    });
+  } catch (error) {
+    if (!isPrismaUniqueConstraintError(error)) {
+      throw error;
+    }
+
+    const raced = await findActiveSyncJob(input.dateKey);
+    if (raced) {
+      console.info("[Bordin:sync-queue]", JSON.stringify({
+        event: "dedupe_race",
+        dateKey: input.dateKey,
+        source: input.source,
+        existingJobId: raced.id,
+        existingStatus: raced.status,
+      }));
+      return raced;
+    }
+
+    throw error;
+  }
+}
 
 export type EnqueueSyncJobInput = {
   dateKey: string;
@@ -15,18 +68,23 @@ export type EnqueueSyncJobInput = {
   payload?: Prisma.InputJsonValue;
 };
 
+export type EnqueueSyncJobIfNeededInput = EnqueueSyncJobInput & {
+  force?: boolean;
+};
+
+export type EnqueueSyncJobIfNeededResult = {
+  dateKey: string;
+  enqueued: boolean;
+  reason: string;
+  job: Awaited<ReturnType<typeof enqueueKandakatorSyncJob>> | null;
+};
+
 export async function enqueueKandakatorSyncJob(input: EnqueueSyncJobInput) {
   if (await shouldUseMemoryDb()) {
     return { id: `memory-${input.dateKey}`, dateKey: input.dateKey, status: "PENDING" as const };
   }
 
-  const existing = await prisma.kandakatorSyncJob.findFirst({
-    where: {
-      dateKey: input.dateKey,
-      status: { in: [SyncJobStatus.PENDING, SyncJobStatus.PROCESSING, SyncJobStatus.FAILED] },
-    },
-    orderBy: { createdAt: "desc" },
-  });
+  const existing = await findActiveSyncJob(input.dateKey);
 
   if (existing) {
     if (existing.status === SyncJobStatus.FAILED || existing.status === SyncJobStatus.PROCESSING) {
@@ -41,6 +99,7 @@ export async function enqueueKandakatorSyncJob(input: EnqueueSyncJobInput) {
         where: { id: existing.id },
         data: {
           status: SyncJobStatus.PENDING,
+          activeDateKey: input.dateKey,
           nextAttemptAt: new Date(),
           lockedAt: null,
           lockedBy: null,
@@ -66,15 +125,7 @@ export async function enqueueKandakatorSyncJob(input: EnqueueSyncJobInput) {
     source: input.source,
     requestedBy: input.requestedBy ?? null,
   }));
-  return prisma.kandakatorSyncJob.create({
-    data: {
-      dateKey: input.dateKey,
-      source: input.source,
-      requestedBy: input.requestedBy,
-      payload: input.payload,
-      maxAttempts: DEFAULT_MAX_ATTEMPTS,
-    },
-  });
+  return createActiveSyncJob(input);
 }
 
 export async function enqueueKandakatorSyncDates(
@@ -88,6 +139,69 @@ export async function enqueueKandakatorSyncDates(
     jobs.push(await enqueueKandakatorSyncJob({ dateKey, source, requestedBy }));
   }
   return jobs;
+}
+
+/** Business-aware enqueue — evaluates lifecycle/DB state before writing to the queue. */
+export async function enqueueKandakatorSyncJobIfNeeded(
+  input: EnqueueSyncJobIfNeededInput,
+): Promise<EnqueueSyncJobIfNeededResult> {
+  const evaluation = await evaluateDateSyncNeed({
+    dateKey: input.dateKey,
+    force: input.force,
+    source: input.source,
+  });
+
+  if (!evaluation.shouldEnqueue) {
+    console.info(
+      "[Bordin:sync-queue]",
+      JSON.stringify({
+        event: "enqueue_skipped",
+        dateKey: input.dateKey,
+        source: input.source,
+        reason: evaluation.reason,
+      }),
+    );
+    return {
+      dateKey: input.dateKey,
+      enqueued: false,
+      reason: evaluation.reason,
+      job: null,
+    };
+  }
+
+  const job = await enqueueKandakatorSyncJob({
+    dateKey: input.dateKey,
+    source: input.source,
+    requestedBy: input.requestedBy,
+    payload: input.payload,
+  });
+
+  return {
+    dateKey: input.dateKey,
+    enqueued: true,
+    reason: evaluation.reason,
+    job,
+  };
+}
+
+export async function enqueueKandakatorSyncDatesIfNeeded(
+  dateKeys: string[],
+  source: string,
+  options?: { requestedBy?: string; force?: boolean },
+) {
+  const unique = [...new Set(dateKeys.filter(Boolean))];
+  const results: EnqueueSyncJobIfNeededResult[] = [];
+  for (const dateKey of unique) {
+    results.push(
+      await enqueueKandakatorSyncJobIfNeeded({
+        dateKey,
+        source,
+        requestedBy: options?.requestedBy,
+        force: options?.force,
+      }),
+    );
+  }
+  return results;
 }
 
 async function releaseStaleLocks() {
@@ -162,6 +276,7 @@ export async function markKandakatorSyncJobSucceeded(
     where: { id: jobId },
     data: {
       status: SyncJobStatus.COMPLETED,
+      activeDateKey: null,
       lockedAt: null,
       lockedBy: null,
       lastError: null,
@@ -227,6 +342,7 @@ export async function markKandakatorSyncJobFailed(jobId: string, errorMessage: s
     where: { id: jobId },
     data: {
       status: exhausted ? SyncJobStatus.DEAD_LETTER : SyncJobStatus.FAILED,
+      activeDateKey: exhausted ? null : current.dateKey,
       lockedAt: null,
       lockedBy: null,
       lastError: errorMessage,

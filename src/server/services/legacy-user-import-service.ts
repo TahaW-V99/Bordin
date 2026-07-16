@@ -48,11 +48,13 @@ async function applyWalletFromLegacy(tx: Tx, userId: string, row: LegacyUserRow)
   const wallet = await tx.coinWallet.findUnique({ where: { userId } });
   if (!wallet) throw new Error("کیف پول کاربر یافت نشد");
 
+  const mergedSystemCoins = row.systemCoins + row.sellableCoins;
+
   const updated = await tx.coinWallet.update({
     where: { userId },
     data: {
-      predictionRewardCoins: row.sellableCoins,
-      systemRewardCoins: row.systemCoins,
+      predictionRewardCoins: 0,
+      systemRewardCoins: mergedSystemCoins,
       purchasedCoins: row.purchasedCoins,
     },
   });
@@ -66,22 +68,15 @@ async function applyWalletFromLegacy(tx: Tx, userId: string, row: LegacyUserRow)
     description: string;
   }> = [];
 
-  const predDelta = row.sellableCoins - wallet.predictionRewardCoins;
-  const sysDelta = row.systemCoins - wallet.systemRewardCoins;
+  const sysDelta =
+    mergedSystemCoins - wallet.systemRewardCoins - wallet.predictionRewardCoins;
   const purchDelta = row.purchasedCoins - wallet.purchasedCoins;
 
-  if (predDelta !== 0) {
-    adjustments.push({
-      coinType: CoinType.PREDICTION_REWARD,
-      amount: predDelta,
-      description: "انتقال سکه قابل فروش از سیستم قدیمی",
-    });
-  }
   if (sysDelta !== 0) {
     adjustments.push({
       coinType: CoinType.SYSTEM_REWARD,
       amount: sysDelta,
-      description: "انتقال سکه سیستمی از سیستم قدیمی",
+      description: "انتقال سکه جایزه سیستمی از سیستم قدیمی",
     });
   }
   if (purchDelta !== 0) {

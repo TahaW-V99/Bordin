@@ -71,12 +71,12 @@ export async function runEmergencyKandakatorRecovery(options?: {
     .filter(([, snapshot]) => snapshot.matchCount === 0 && !snapshot.hasPublished)
     .map(([dateKey]) => dateKey);
 
-  const [{ enqueueKandakatorSyncDates }, { processKandakatorSyncQueue }] = await Promise.all([
+  const [{ enqueueKandakatorSyncDatesIfNeeded }, { processKandakatorSyncQueue }] = await Promise.all([
     import("@/server/services/kandakator-sync-queue-service"),
     import("@/server/services/kandakator-sync-queue-processor"),
   ]);
 
-  await enqueueKandakatorSyncDates(dateKeys, source);
+  await enqueueKandakatorSyncDatesIfNeeded(dateKeys, source, { force: true });
 
   let jobsProcessed = 0;
   const processDeadline = Date.now() + Math.min(waitMs, waitForIngest ? 30_000 : 20_000);

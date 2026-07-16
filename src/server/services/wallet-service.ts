@@ -147,14 +147,14 @@ export async function addPredictionRewardCoins(
 }
 
 /** Positive or negative adjustment after prediction re-scoring. */
-export async function adjustPredictionRewardCoins(
+export async function adjustSystemRewardCoins(
   userId: string,
   delta: number,
   description: string,
 ) {
   if (delta === 0) return null;
   if (delta > 0) {
-    return addPredictionRewardCoins(
+    return addSystemRewardCoins(
       userId,
       delta,
       CoinTransactionType.PREDICTION_REWARD,
@@ -164,17 +164,17 @@ export async function adjustPredictionRewardCoins(
 
   const amount = Math.abs(delta);
   if (await shouldUseMemoryDb()) {
-    devMemoryDb.wallet.adjustPredictionReward(userId, delta);
+    devMemoryDb.wallet.adjustSystemReward(userId, delta);
     return devMemoryDb.wallet.getByUserId(userId);
   }
 
   const wallet = await prisma.coinWallet.findUnique({ where: { userId } });
   if (!wallet) throw new Error("کیف پول یافت نشد");
 
-  const deduct = Math.min(wallet.predictionRewardCoins, amount);
+  const deduct = Math.min(wallet.systemRewardCoins, amount);
   const updated = await prisma.coinWallet.update({
     where: { userId },
-    data: { predictionRewardCoins: { decrement: deduct } },
+    data: { systemRewardCoins: { decrement: deduct } },
   });
 
   const balance =
@@ -183,7 +183,7 @@ export async function adjustPredictionRewardCoins(
   await prisma.coinTransaction.create({
     data: {
       walletId: updated.id,
-      coinType: CoinType.PREDICTION_REWARD,
+      coinType: CoinType.SYSTEM_REWARD,
       amount: -deduct,
       balanceAfter: balance,
       type: CoinTransactionType.PREDICTION_REWARD,
@@ -323,40 +323,8 @@ export async function addPurchasedCoins(
   return wallet;
 }
 
-export async function sellPredictionCoins(userId: string, coinAmount: number) {
-  if (await shouldUseMemoryDb()) {
-    return devMemoryDb.wallet.sellPredictionCoins(userId, coinAmount);
-  }
-
-  const wallet = await prisma.coinWallet.findUnique({ where: { userId } });
-  if (!wallet || wallet.predictionRewardCoins < coinAmount) {
-    throw new Error("موجودی سکه قابل فروش کافی نیست");
-  }
-
-  const tomanValue = Math.floor(coinAmount * 45);
-  const updated = await prisma.coinWallet.update({
-    where: { userId },
-    data: {
-      predictionRewardCoins: { decrement: coinAmount },
-      cashBalanceToman: { increment: tomanValue },
-    },
-  });
-
-  await prisma.coinTransaction.create({
-    data: {
-      walletId: updated.id,
-      coinType: CoinType.PREDICTION_REWARD,
-      amount: -coinAmount,
-      balanceAfter:
-        updated.predictionRewardCoins +
-        updated.systemRewardCoins +
-        updated.purchasedCoins,
-      type: CoinTransactionType.SELL,
-      description: `فروش ${coinAmount} سکه`,
-    },
-  });
-
-  return { wallet: updated, tomanValue };
+export async function sellPredictionCoins(_userId: string, _coinAmount: number) {
+  throw new Error("فروش سکه غیرفعال است");
 }
 
 export async function addXp(userId: string, amount: number) {

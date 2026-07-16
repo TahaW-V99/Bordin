@@ -128,7 +128,7 @@ export function PredictionResultCard({
             <div className="flex flex-wrap items-center gap-3 text-xs">
               <span
                 className="flex items-center gap-1 text-bordin-orange"
-                title="سکه جایزه پیش‌بینی"
+                title="سکه جایزه سیستمی"
               >
                 <Coins className="h-3.5 w-3.5" />
                 +{formatPersianNumber(item.coinsEarned ?? 0)} سکه

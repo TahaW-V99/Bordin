@@ -18,7 +18,10 @@ import { isMatchResultKnown } from "@/shared/lib/match-result";
 import { logMatchStatusChange } from "@/server/services/match-lifecycle-logger";
 import { recordKandakatorSync } from "@/server/services/kandakator-sync-health";
 import { readMatchScore as readApiMatchScore } from "@/server/services/fixture-api";
-import { enqueueKandakatorSyncDates } from "@/server/services/kandakator-sync-queue-service";
+import { enqueueKandakatorSyncDates, enqueueKandakatorSyncDatesIfNeeded } from "@/server/services/kandakator-sync-queue-service";
+import {
+  kandakatorNeedsApiRefresh,
+} from "@/server/services/kandakator-sync-policy";
 import {
   canDeleteKandakatorData,
   isEmptyApiPayload,
@@ -39,7 +42,6 @@ const API_CIRCUIT_FAILURE_THRESHOLD = 2;
 const API_CIRCUIT_COOLDOWN_MS = 15 * 60 * 1000;
 const lastSyncAtByDate = new Map<string, number>();
 const syncInFlight = new Set<string>();
-const settlementScheduled = new Set<string>();
 
 const fixtureApiCircuit = {
   consecutiveFailures: 0,
@@ -149,7 +151,7 @@ export async function syncDailyKandakatorFromApi(
   if (await shouldUseMemoryDb()) {
     throw new Error("همگام‌سازی فقط با دیتابیس واقعی (staging/production) کار می‌کند");
   }
-  await enqueueKandakatorSyncDates([dateKey], "legacy-sync-cutover");
+  await enqueueKandakatorSyncDatesIfNeeded([dateKey], "legacy-sync-cutover");
   return { date: dateKey, matchCount: 0, kandakatorId: null };
 }
 
@@ -458,11 +460,12 @@ export async function syncDailyKandakatorFromFootballMatches(
 export async function syncTehranWeekFromApi() {
   const { getTehranWeekDays } = await import("@/server/services/kandakator-service");
   const days = getTehranWeekDays().map((day) => day.date);
-  await enqueueKandakatorSyncDates(days, "manual-week-enqueue");
+  await enqueueKandakatorSyncDatesIfNeeded(days, "manual-week-enqueue", { force: true });
   return days.map((date) => ({ date, matchCount: 0, kandakatorId: null }));
 }
 
 type KandakatorWithMatches = {
+  id: string;
   matches: Array<{
     match: {
       externalId: string | null;
@@ -474,34 +477,7 @@ type KandakatorWithMatches = {
   }>;
 };
 
-function kandakatorNeedsApiRefresh(dateKey: string, existing: KandakatorWithMatches | null) {
-  if (!existing || existing.matches.length === 0) return true;
-
-  const hasApiMatches = existing.matches.some((row) => Boolean(row.match.externalId));
-  if (!hasApiMatches) return true;
-
-  const now = Date.now();
-  const todayKey = tehranDateKey(new Date());
-
-  for (const { match } of existing.matches) {
-    if (match.status === "LIVE") return true;
-    if (!isMatchResultKnown(match) && match.kickoffAt.getTime() <= now) return true;
-  }
-
-  if (dateKey < todayKey) {
-    return !existing.matches.every(({ match }) => isMatchResultKnown(match));
-  }
-
-  if (dateKey === todayKey) {
-    return existing.matches.some(
-      ({ match }) => match.status === "LIVE" || (!isMatchResultKnown(match) && match.kickoffAt.getTime() <= now),
-    );
-  }
-
-  return false;
-}
-
-async function loadKandakatorSnapshot(dateKey: string) {
+async function loadKandakatorSnapshot(dateKey: string): Promise<KandakatorWithMatches | null> {
   const dayStart = tehranDayStart(dateKey);
   return prisma.dailyKandakator.findFirst({
     where: {
@@ -531,7 +507,7 @@ export async function ensureKandakatorSyncedForDate(
   _options?: { force?: boolean },
 ) {
   if (await shouldUseMemoryDb()) return;
-  await enqueueKandakatorSyncDates([dateKey], "legacy-ensure-cutover");
+  await enqueueKandakatorSyncDatesIfNeeded([dateKey], "legacy-ensure-cutover");
 }
 
 export async function awaitKandakatorScoreRefresh(
@@ -556,20 +532,7 @@ export function scheduleKandakatorSync(dateKey: string, options?: { force?: bool
   void ensureKandakatorSyncedForDate(dateKey, options).catch(() => {});
 }
 
-export function scheduleKandakatorSettlement(kandakatorId: string) {
-  if (settlementScheduled.has(kandakatorId)) return;
-  settlementScheduled.add(kandakatorId);
-  void (async () => {
-    try {
-      const { settleKandakatorFinishedMatches } = await import(
-        "@/server/services/settlement-service"
-      );
-      await settleKandakatorFinishedMatches(kandakatorId);
-    } finally {
-      setTimeout(() => settlementScheduled.delete(kandakatorId), 60_000);
-    }
-  })();
-}
+export { scheduleKandakatorSettlement } from "@/server/services/settlement-scheduler";
 
 export async function prepareKandakatorForDisplay(dateKey: string) {
   if (await shouldUseMemoryDb()) return;
@@ -594,11 +557,14 @@ export async function prepareKandakatorForDisplay(dateKey: string) {
   }
 
   if (datesToEnqueue.size > 0) {
-    void enqueueKandakatorSyncDates([...datesToEnqueue], "prepare-display").catch(() => {});
+    void enqueueKandakatorSyncDatesIfNeeded([...datesToEnqueue], "prepare-display").catch(() => {});
   }
 
   const hasSettleable = existing?.matches.some(({ match }) => isMatchResultKnown(match));
   if (hasSettleable && existing) {
+    const { scheduleKandakatorSettlement } = await import(
+      "@/server/services/settlement-scheduler"
+    );
     scheduleKandakatorSettlement(existing.id);
   }
 }

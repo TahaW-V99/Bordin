@@ -52,11 +52,21 @@
 - Runs `settleAllFinishedMatches()`
 - Records health metrics
 
-### Read-path fixes
+### Read-path fixes (Phase 1)
 
-- `getKandakatorForDate`: calls `prepareKandakatorForDisplay` + queue processing
-- `ensureRecentPredictionsScored`: waits for sync, **re-fetches** unscored predictions
-- Home dashboard: polls every 30s when matches need scores
+User-facing reads **must not** call VictoryAPI or perform settlement writes.
+
+| Path | Allowed | Background signal |
+|------|---------|-------------------|
+| `getKandakatorForDate` | DB read + DTO | `signalBackgroundSyncForKandakatorDates`, `scheduleKandakatorSettlement` |
+| `getUserPredictionResultsLast7Days` | DB read + display-only accuracy calc | `signalBackgroundWorkForRecentPredictions` → sync queue + `scheduleMatchPredictionsSettlement` |
+| Global/team leaderboards | DB read | None (see TD-2 in `PHASE1_TECHNICAL_DEBT.md`) |
+
+Settlement runs in background via `settlement-scheduler.ts` (in-process debounce, Phase 2 → durable queue).
+Reconciliation tick (5 min) runs `settleAllFinishedMatches()` as additional safety net.
+Sync queue processor settles after score ingest (not on user path).
+
+See `docs/PHASE1_TECHNICAL_DEBT.md` for deferred items.
 
 ## Scheduled jobs
 

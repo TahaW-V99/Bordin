@@ -3,7 +3,7 @@ import { shouldUseMemoryDb } from "@/server/db";
 import { prisma } from "@/shared/lib/prisma";
 import { kandakatorDateFromKey } from "@/shared/lib/dates";
 import { countStaleMatchesForDate } from "@/server/services/kandakator-reconciliation-service";
-import { enqueueKandakatorSyncDates } from "@/server/services/kandakator-sync-queue-service";
+import { enqueueKandakatorSyncDatesIfNeeded } from "@/server/services/kandakator-sync-queue-service";
 
 const DEFAULT_WAIT_MS = 25_000;
 const POLL_INTERVAL_MS = 2_000;
@@ -53,11 +53,26 @@ export type StaleScoreRefreshResult = {
 };
 
 /**
+ * Signal background sync via the queue (evaluateDateSyncNeed — never calls VictoryAPI).
+ */
+export async function signalBackgroundSyncForKandakatorDates(
+  dateKeys: string[],
+  source: string,
+): Promise<void> {
+  if (await shouldUseMemoryDb()) return;
+
+  const unique = [...new Set(dateKeys.filter(Boolean))];
+  if (unique.length === 0) return;
+
+  void enqueueKandakatorSyncDatesIfNeeded(unique, source).catch(() => {});
+}
+
+/**
  * Enqueue sync jobs and optionally wait until DB stale count decreases.
  */
 export async function awaitStaleScoreRefreshForDates(
   dateKeys: string[],
-  options?: { waitForUpdate?: boolean; waitMs?: number },
+  options?: { waitForUpdate?: boolean; waitMs?: number; source?: string },
 ): Promise<StaleScoreRefreshResult> {
   if (await shouldUseMemoryDb()) {
     return { refreshed: true, waited: false };
@@ -67,6 +82,7 @@ export async function awaitStaleScoreRefreshForDates(
   if (unique.length === 0) return { refreshed: true, waited: false };
 
   const startedAt = Date.now();
+  const source = options?.source ?? "stale-read";
   const [staleBefore, missingBefore] = await Promise.all([
     hasStaleScoresForDates(unique),
     hasMissingKandakatorForDates(unique),
@@ -76,7 +92,7 @@ export async function awaitStaleScoreRefreshForDates(
     return { refreshed: true, waited: false, durationMs: Date.now() - startedAt };
   }
 
-  await enqueueKandakatorSyncDates(unique, "stale-read");
+  await enqueueKandakatorSyncDatesIfNeeded(unique, source);
 
   if (!options?.waitForUpdate) {
     return {

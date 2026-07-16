@@ -27,7 +27,7 @@ async function runQueueCycle() {
 
   running = true;
   try {
-    const [{ processKandakatorSyncQueue }, { enqueueKandakatorSyncDates }] = await Promise.all([
+    const [{ processKandakatorSyncQueue }, { enqueueKandakatorSyncDatesIfNeeded }] = await Promise.all([
       import("@/server/services/kandakator-sync-queue-processor"),
       import("@/server/services/kandakator-sync-queue-service"),
     ]);
@@ -46,10 +46,10 @@ async function runQueueCycle() {
       }
     }
     if (missingDates.length > 0) {
-      await enqueueKandakatorSyncDates(missingDates, "scheduler-recovery");
+      await enqueueKandakatorSyncDatesIfNeeded(missingDates, "scheduler-recovery");
     }
 
-    await enqueueKandakatorSyncDates(getDefaultQueuedDates(), "scheduler");
+    await enqueueKandakatorSyncDatesIfNeeded(getDefaultQueuedDates(), "scheduler");
     await processKandakatorSyncQueue(2);
   } catch (error) {
     console.error("[Bordin] kandakator queue cycle error:", error);

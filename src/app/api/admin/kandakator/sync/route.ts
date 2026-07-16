@@ -3,7 +3,7 @@ import { z } from "zod";
 import { getSession } from "@/shared/lib/auth";
 import { getApiErrorMessage } from "@/shared/lib/api-errors";
 import { requireAdmin } from "@/server/services/admin-service";
-import { enqueueKandakatorSyncDates } from "@/server/services/kandakator-sync-queue-service";
+import { enqueueKandakatorSyncDatesIfNeeded } from "@/server/services/kandakator-sync-queue-service";
 import { tehranDateKey } from "@/server/memory/kandakator-seed";
 
 const bodySchema = z.object({
@@ -27,13 +27,23 @@ export async function POST(request: Request) {
         base.setDate(base.getDate() + index);
         return tehranDateKey(base);
       });
-      const jobs = await enqueueKandakatorSyncDates(weekDates, "admin-week-sync", session.userId);
-      return NextResponse.json({ success: true, jobs });
+      const results = await enqueueKandakatorSyncDatesIfNeeded(weekDates, "admin-week-sync", {
+        requestedBy: session.userId,
+        force: true,
+      });
+      return NextResponse.json({ success: true, jobs: results.map((r) => r.job).filter(Boolean) });
     }
 
     const date = data.date ?? tehranDateKey(new Date());
-    const jobs = await enqueueKandakatorSyncDates([date], "admin-date-sync", session.userId);
-    return NextResponse.json({ success: true, publish: data.publish ?? true, jobs });
+    const results = await enqueueKandakatorSyncDatesIfNeeded([date], "admin-date-sync", {
+      requestedBy: session.userId,
+      force: true,
+    });
+    return NextResponse.json({
+      success: true,
+      publish: data.publish ?? true,
+      jobs: results.map((r) => r.job).filter(Boolean),
+    });
   } catch (error) {
     return NextResponse.json({ error: getApiErrorMessage(error) }, { status: 400 });
   }

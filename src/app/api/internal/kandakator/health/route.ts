@@ -3,6 +3,7 @@ import { getKandakatorSyncHealth } from "@/server/services/kandakator-sync-healt
 import { getRecentKandakatorDateKeys } from "@/server/services/kandakator-reconciliation-service";
 import { getKandakatorSyncQueueStats } from "@/server/services/kandakator-sync-queue-service";
 import { runKandakatorSystemAudit } from "@/server/services/kandakator-system-audit";
+import { getDeadLetterDiagnostics } from "@/server/services/kandakator-dead-letter-diagnostics";
 
 function authorize(request: Request) {
   const token = process.env.KANDAKATOR_SYNC_PUSH_TOKEN?.trim();
@@ -20,6 +21,7 @@ export async function GET(request: Request) {
   const recentDates = await getRecentKandakatorDateKeys();
   const queue = await getKandakatorSyncQueueStats();
   const audit = await runKandakatorSystemAudit();
+  const deadLetterDiagnostics = await getDeadLetterDiagnostics();
 
   const minutesSinceLastSuccess = health.lastSuccess
     ? Math.round((Date.now() - health.lastSuccess.createdAt.getTime()) / 60_000)
@@ -53,6 +55,7 @@ export async function GET(request: Request) {
     staleMatchCount: health.staleMatchCount,
     unsettledPredictionCount: health.unsettledPredictionCount,
     queue,
+    deadLetterDiagnostics,
     recentKandakatorDates: recentDates,
     recentRecords: health.recentRecords.map((row) => ({
       ...row,

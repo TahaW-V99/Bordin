@@ -55,7 +55,7 @@ export function PredictionResultsSection({
     <section>
       <h3 className="mb-1 font-bold">نتایج پیش‌بینی</h3>
       <p className="mb-3 text-xs text-white/45">
-        سکه و XP به مجموع شما اضافه می‌شود. سکه جایزه به موجودی «سکه جایزه پیش‌بینی» (قابل فروش) واریز می‌شود.
+        سکه و XP به مجموع شما اضافه می‌شود. سکه جایزه به موجودی «سکه جایزه سیستمی» واریز می‌شود.
       </p>
       <div className="space-y-3">
         {results.map((item) => {
@@ -127,7 +127,7 @@ export function PredictionResultsSection({
                     </span>
                   </div>
                   <div className="flex flex-wrap items-center gap-3 text-xs">
-                    <span className="flex items-center gap-1 text-bordin-orange" title="سکه جایزه پیش‌بینی — قابل فروش">
+                    <span className="flex items-center gap-1 text-bordin-orange" title="سکه جایزه سیستمی">
                       <Coins className="h-3.5 w-3.5" />
                       +{formatPersianNumber(item.coinsEarned ?? 0)} سکه
                     </span>

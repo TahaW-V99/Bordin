@@ -487,13 +487,13 @@ export const devMemoryDb = {
       db().wallets.set(userId, w);
       return w;
     },
-    adjustPredictionReward(userId: string, delta: number) {
+    adjustSystemReward(userId: string, delta: number) {
       const w = db().wallets.get(userId);
       if (!w) throw new Error("کیف پول یافت نشد");
       if (delta >= 0) {
-        w.predictionRewardCoins += delta;
+        w.systemRewardCoins += delta;
       } else {
-        w.predictionRewardCoins = Math.max(0, w.predictionRewardCoins + delta);
+        w.systemRewardCoins = Math.max(0, w.systemRewardCoins + delta);
       }
       db().wallets.set(userId, w);
       return w;
@@ -965,7 +965,7 @@ export const devMemoryDb = {
       p.scoredAt = new Date();
 
       if (reward.coins > 0) {
-        devMemoryDb.wallet.addPredictionReward(input.userId, reward.coins);
+        devMemoryDb.wallet.addSystemReward(input.userId, reward.coins);
       }
       if (reward.xp > 0) {
         devMemoryDb.profile.addXp(input.userId, reward.xp);

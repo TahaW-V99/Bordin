@@ -3,7 +3,7 @@ import { shouldUseMemoryDb } from "@/server/db";
 import { prisma } from "@/shared/lib/prisma";
 import { kandakatorDateFromKey } from "@/shared/lib/dates";
 import { tehranDateKey } from "@/server/memory/kandakator-seed";
-import { enqueueKandakatorSyncDates } from "@/server/services/kandakator-sync-queue-service";
+import { enqueueKandakatorSyncDatesIfNeeded } from "@/server/services/kandakator-sync-queue-service";
 import { processKandakatorSyncQueue } from "@/server/services/kandakator-sync-queue-processor";
 
 const DEFAULT_WAIT_MS = 45_000;
@@ -78,7 +78,7 @@ export async function ensureKandakatorIngestedForDates(
   }
 
   try {
-    await enqueueKandakatorSyncDates(unique, options?.source ?? "display-ingest");
+    await enqueueKandakatorSyncDatesIfNeeded(unique, options?.source ?? "display-ingest");
   } catch (error) {
     console.error("[Bordin:display-ingest] enqueue failed:", error);
   }

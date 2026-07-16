@@ -14,14 +14,7 @@ export function CoinBreakdown({
 }) {
   const items = [
     {
-      label: "سکه‌ جایزه پیش‌بینی",
-      value: predictionRewardCoins,
-      color: "text-bordin-green",
-      sellable: true,
-      image: "/images/store/coin-prediction-reward.png",
-    },
-    {
-      label: "پاداش سیستم",
+      label: "سکه جایزه سیستمی",
       value: systemRewardCoins,
       color: "text-bordin-blue",
       image: "/images/store/coin-system-reward.png",
@@ -52,10 +45,7 @@ export function CoinBreakdown({
                 height={62}
                 className="h-[62px] w-[63px] object-contain [mix-blend-mode:screen]"
               />
-              <span className="text-sm text-white/60">
-                {item.label}
-                {item.sellable ? <span className="mr-1 text-[10px] text-bordin-green">(قابل فروش)</span> : null}
-              </span>
+              <span className="text-sm text-white/60">{item.label}</span>
             </div>
             <span className={`font-semibold ${item.color}`}>{formatPersianNumber(item.value)}</span>
           </div>

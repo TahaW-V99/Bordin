@@ -23,10 +23,16 @@ const TARGET_MATCHES = [
 /** Verified final scores when Fixture API fulltime is stale or missing. */
 const MANUAL_FINAL_SCORES = [
   {
-    homeAliases: ["امریکا", "آمریکا", "USA", "United States"],
-    awayAliases: ["Bosnia", "Herzegovina", "Bosnia-Herzegovina", "بوسنی"],
+    homeAliases: ["Bosnia", "Herzegovina", "Bosnia-Herzegovina", "بوسنی"],
+    awayAliases: ["امریکا", "آمریکا", "USA", "United States"],
     homeScore: 2,
     awayScore: 0,
+  },
+  {
+    homeAliases: ["فرانسه", "France"],
+    awayAliases: ["اسپانیا", "Spain"],
+    homeScore: 0,
+    awayScore: 2,
   },
 ];
 

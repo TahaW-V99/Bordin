@@ -13,10 +13,8 @@ import {
 } from "@/server/memory/kandakator-seed";
 import { kandakatorDateFromKey, serializeKickoffAt } from "@/shared/lib/dates";
 import { userNeedsDisplayName as checkDisplayName } from "@/shared/lib/kandakator-utils";
-import {
-  awaitKandakatorScoreRefresh,
-  prepareKandakatorForDisplay,
-} from "@/server/services/kandakator-sync-service";
+import { signalBackgroundSyncForKandakatorDates } from "@/server/services/kandakator-remote-sync-service";
+import { scheduleKandakatorSettlement } from "@/server/services/settlement-scheduler";
 import { resolveDailyPredictionEntryFeesForMatches } from "@/server/services/team-competition-prediction-fee-service";
 import {
   resolveTeamCompetitionBadgesForMatches,
@@ -34,7 +32,6 @@ import {
   readMatchScore,
 } from "@/server/services/fixture-api";
 import { translateMatchTeamsToFa } from "@/shared/lib/football-names-fa";
-import { scheduleBackgroundPersianRefreshForStoredMatches } from "@/server/services/fixture-persian-names";
 import { getKnockoutPredictionUiState } from "@/server/services/team-competition-knockout-prediction-service";
 import {
   getWatchPartyMapForMatchIds,
@@ -211,10 +208,10 @@ export async function refreshKandakatorScoresForDates(dateKeys: string[]) {
     return;
   }
 
-  const { awaitKandakatorScoreRefresh } = await import(
-    "@/server/services/kandakator-sync-service"
+  const { signalBackgroundSyncForKandakatorDates } = await import(
+    "@/server/services/kandakator-remote-sync-service"
   );
-  await awaitKandakatorScoreRefresh(unique);
+  void signalBackgroundSyncForKandakatorDates(unique, "legacy-score-refresh").catch(() => {});
 }
 
 function filterMatchesForTehranDate<T extends { match: { kickoffAt: Date } }>(
@@ -405,10 +402,9 @@ export async function getKandakatorForDate(userId: string, dateKey?: string) {
     return serializeMemoryKandakator(userId, kandakator, targetKey);
   }
 
-  void prepareKandakatorForDisplay(targetKey);
-  void awaitKandakatorScoreRefresh(scoreRefreshDateKeys(targetKey), {
-    waitForUpdate: false,
-  }).catch(() => {});
+  void signalBackgroundSyncForKandakatorDates(scoreRefreshDateKeys(targetKey), "user-read").catch(
+    () => {},
+  );
 
   let kandakator = await loadPublishedKandakatorWithMatches(targetKey);
 
@@ -433,12 +429,7 @@ export async function getKandakatorForDate(userId: string, dateKey?: string) {
     return null;
   }
 
-  void settleKandakatorFinishedMatches(kandakator.id).catch(() => {});
-
-  scheduleBackgroundPersianRefreshForStoredMatches(
-    targetKey,
-    kandakator.matches.map((km) => km.match),
-  );
+  scheduleKandakatorSettlement(kandakator.id);
 
   return buildKandakatorDto(userId, targetKey, kandakator);
 }

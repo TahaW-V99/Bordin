@@ -1264,6 +1264,7 @@ model SystemEventLog {
 model KandakatorSyncJob {
   id             String        @id @default(cuid())
   dateKey        String
+  activeDateKey  String?       @unique
   status         SyncJobStatus @default(PENDING)
   source         String
   requestedBy    String?

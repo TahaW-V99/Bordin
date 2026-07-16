@@ -365,40 +365,8 @@ export async function getSellPackages() {
   return SELL_COIN_PACKAGES;
 }
 
-export async function sellByPackage(userId: string, coinAmount: number) {
-  const pack = SELL_COIN_PACKAGES.find((item) => item.coinAmount === coinAmount);
-  if (!pack) throw new Error("بسته فروش معتبر نیست");
-  if (await shouldUseMemoryDb()) {
-    const result = devMemoryDb.wallet.sellPredictionCoins(userId, coinAmount);
-    const diff = pack.priceToman - result.tomanValue;
-    if (diff > 0) devMemoryDb.wallet.addCash(userId, diff);
-    return { ...result, tomanValue: pack.priceToman };
-  }
-  const wallet = await prisma.coinWallet.findUnique({ where: { userId } });
-  if (!wallet || wallet.predictionRewardCoins < coinAmount) {
-    throw new Error("موجودی سکه قابل فروش کافی نیست");
-  }
-  const updated = await prisma.coinWallet.update({
-    where: { userId },
-    data: {
-      predictionRewardCoins: { decrement: coinAmount },
-      cashBalanceToman: { increment: pack.priceToman },
-    },
-  });
-  const balance =
-    updated.predictionRewardCoins + updated.systemRewardCoins + updated.purchasedCoins;
-  await prisma.coinTransaction.create({
-    data: {
-      walletId: updated.id,
-      coinType: CoinType.PREDICTION_REWARD,
-      amount: -coinAmount,
-      balanceAfter: balance,
-      type: CoinTransactionType.SELL,
-      description: `فروش ${coinAmount} سکه`,
-      metadata: { tomanValue: pack.priceToman, packageId: pack.id },
-    },
-  });
-  return { wallet: updated, tomanValue: pack.priceToman };
+export async function sellByPackage(_userId: string, _coinAmount: number) {
+  throw new Error("فروش سکه غیرفعال است");
 }
 
 export async function getStoreWallet(userId: string) {

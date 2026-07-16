@@ -233,11 +233,12 @@ export async function aggregateRankingScoresForCompetition(teamCompetitionId: st
 
   });
 
-
+  const config = await loadRankingStageConfig(teamCompetitionId);
+  const sharedMatchIds = config ? undefined : await getRankingStageMatchIds(teamCompetitionId);
 
   for (const entry of entries) {
 
-    const score = await sumTeamMemberRankingXp(teamCompetitionId, entry.teamId);
+    const score = await sumTeamMemberRankingXp(teamCompetitionId, entry.teamId, sharedMatchIds);
 
     await prisma.teamCompetitionEntry.update({
 

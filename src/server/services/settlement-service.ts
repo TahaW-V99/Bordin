@@ -13,9 +13,9 @@ import {
   type PredictionResultItem,
 } from "@/shared/types/prediction-results";
 import {
-  addPredictionRewardCoins,
+  addSystemRewardCoins,
   addXpWithLevelUp,
-  adjustPredictionRewardCoins,
+  adjustSystemRewardCoins,
 } from "@/server/services/wallet-service";
 import { createNotification } from "@/server/services/notification-service";
 import { isMatchResultKnown } from "@/shared/lib/match-result";
@@ -213,7 +213,7 @@ export async function settleMemoryMatchPredictions(matchId: string) {
       prediction.xpEarned = reward.xp;
       const coinDelta = reward.coins - oldCoins;
       const xpDelta = reward.xp - oldXp;
-      if (coinDelta !== 0) devMemoryDb.wallet.adjustPredictionReward(prediction.userId, coinDelta);
+      if (coinDelta !== 0) devMemoryDb.wallet.adjustSystemReward(prediction.userId, coinDelta);
       if (xpDelta !== 0) devMemoryDb.profile.addXp(prediction.userId, xpDelta);
       settled += 1;
       continue;
@@ -347,10 +347,10 @@ async function scoreOrRescorePredictionRecord(input: {
     });
 
     if (coinDelta !== 0) {
-      await adjustPredictionRewardCoins(
+      await adjustSystemRewardCoins(
         input.userId,
         coinDelta,
-        `اصلاح جایزه پیش‌بینی — ${accuracy}٪ دقت`,
+        `اصلاح سکه جایزه سیستمی — ${accuracy}٪ دقت`,
       );
     }
 
@@ -400,11 +400,11 @@ async function scoreOrRescorePredictionRecord(input: {
   }
 
   if (reward.coins > 0) {
-    await addPredictionRewardCoins(
+    await addSystemRewardCoins(
       input.userId,
       reward.coins,
       CoinTransactionType.PREDICTION_REWARD,
-      `سکه جایزه پیش‌بینی — ${accuracy}٪ دقت`,
+      `سکه جایزه سیستمی — ${accuracy}٪ دقت`,
     );
   }
 
@@ -417,7 +417,11 @@ async function scoreOrRescorePredictionRecord(input: {
   return true;
 }
 
-async function ensureRecentPredictionsScored(userId: string) {
+/**
+ * Read-only DB scan + background signals for profile prediction reads.
+ * Never performs settlement writes on the request path (production).
+ */
+async function signalBackgroundWorkForRecentPredictions(userId: string) {
   const since = subDays(new Date(), 7);
   const { tehranDateKey } = await import("@/server/memory/kandakator-seed");
 
@@ -455,30 +459,31 @@ async function ensureRecentPredictionsScored(userId: string) {
   });
 
   const dateKeysToSync = new Set<string>();
+  const matchIdsToSettle = new Set<string>();
   const now = Date.now();
+
   for (const prediction of unscored) {
-    if (
-      prediction.match.kickoffAt.getTime() <= now &&
-      !isMatchResultKnown(prediction.match)
-    ) {
+    if (isMatchResultKnown(prediction.match)) {
+      matchIdsToSettle.add(prediction.matchId);
+    } else if (prediction.match.kickoffAt.getTime() <= now) {
       dateKeysToSync.add(tehranDateKey(prediction.match.kickoffAt));
     }
   }
 
   if (dateKeysToSync.size > 0) {
-    const { awaitKandakatorScoreRefresh } = await import(
-      "@/server/services/kandakator-sync-service"
+    const { signalBackgroundSyncForKandakatorDates } = await import(
+      "@/server/services/kandakator-remote-sync-service"
     );
-    await awaitKandakatorScoreRefresh([...dateKeysToSync], { waitForUpdate: false });
+    void signalBackgroundSyncForKandakatorDates([...dateKeysToSync], "prediction-read").catch(
+      () => {},
+    );
   }
 
-  const freshUnscored = await prisma.prediction.findMany({
-    where: { userId, submittedAt: { gte: since }, scoredAt: null },
-    include: { match: true },
-  });
-
-  for (const prediction of freshUnscored) {
-    await settleMatchPredictions(prediction.matchId);
+  if (matchIdsToSettle.size > 0) {
+    const { scheduleMatchPredictionsSettlement } = await import(
+      "@/server/services/settlement-scheduler"
+    );
+    scheduleMatchPredictionsSettlement([...matchIdsToSettle]);
   }
 }
 
@@ -491,7 +496,7 @@ export async function getUserPredictionResultsLast7Days(
     : userId;
   const since = subDays(new Date(), 7);
 
-  await ensureRecentPredictionsScored(uid);
+  await signalBackgroundWorkForRecentPredictions(uid);
 
   if (await shouldUseMemoryDb()) {
     return devMemoryDb.predictions.listResultsLast7Days(uid, filter, since);

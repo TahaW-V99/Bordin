@@ -4,7 +4,9 @@
  */
 import { spawnSync } from "node:child_process";
 
-const result = spawnSync('liara shell --app bordin --command "npx prisma db push"', {
+const result = spawnSync(
+  'liara shell --app bordin --command "npx prisma db push --accept-data-loss"',
+  {
   stdio: "inherit",
   shell: true,
 });

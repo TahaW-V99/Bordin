@@ -90,8 +90,9 @@ export async function syncStageMatchCache(input: {
   stage: TeamCompetitionMatchStage;
   knockoutRoundId?: string | null;
   config: StageWindowConfig;
+  resolved?: ResolvedStageMatch[];
 }) {
-  const resolved = await resolveEligibleStageMatches(input.config);
+  const resolved = input.resolved ?? (await resolveEligibleStageMatches(input.config));
   const resolvedIds = new Set(resolved.map((m) => m.matchId));
 
   const existing = await prisma.teamCompetitionStageMatch.findMany({
@@ -186,12 +187,13 @@ export async function getRankingStageMatchIds(teamCompetitionId: string): Promis
 
   const config = await loadRankingStageConfig(teamCompetitionId);
   if (!config) return [];
+  const resolved = await resolveEligibleStageMatches(config);
   await syncStageMatchCache({
     teamCompetitionId,
     stage: TeamCompetitionMatchStage.RANKING,
     config,
+    resolved,
   });
-  const resolved = await resolveEligibleStageMatches(config);
   return resolved.map((m) => m.matchId);
 }
 
@@ -212,13 +214,14 @@ export async function getKnockoutRoundMatchIds(knockoutRoundId: string): Promise
 
   const config = await loadKnockoutRoundStageConfig(knockoutRoundId);
   if (!config) return [];
+  const resolved = await resolveEligibleStageMatches(config);
   await syncStageMatchCache({
     teamCompetitionId: round.teamCompetition.id,
     stage: TeamCompetitionMatchStage.KNOCKOUT,
     knockoutRoundId,
     config,
+    resolved,
   });
-  const resolved = await resolveEligibleStageMatches(config);
   return resolved.map((m) => m.matchId);
 }
 

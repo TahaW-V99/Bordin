@@ -14,7 +14,7 @@ import {
   logReconcileEvent,
 } from "@/server/services/match-lifecycle-logger";
 import { recordKandakatorSync } from "@/server/services/kandakator-sync-health";
-import { enqueueKandakatorSyncDates } from "@/server/services/kandakator-sync-queue-service";
+import { enqueueKandakatorSyncDatesIfNeeded } from "@/server/services/kandakator-sync-queue-service";
 import {
   getRecentTehranDateKeys,
   countPublishedMatchesForDate,
@@ -182,7 +182,7 @@ export async function runKandakatorReconciliation(): Promise<ReconciliationResul
     const datesTriggered = [...dateKeys];
 
     if (datesTriggered.length > 0) {
-      await enqueueKandakatorSyncDates(datesTriggered, "reconciliation");
+      await enqueueKandakatorSyncDatesIfNeeded(datesTriggered, "reconciliation");
     }
 
     const settleResult = await settleAllFinishedMatches();
