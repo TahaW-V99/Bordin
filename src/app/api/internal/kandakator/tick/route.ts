@@ -1,8 +1,13 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { addDays } from "date-fns";
 import { getApiErrorMessage } from "@/shared/lib/api-errors";
 import { processKandakatorSyncQueue } from "@/server/services/kandakator-sync-queue-processor";
 import { runKandakatorReconciliation } from "@/server/services/kandakator-reconciliation-service";
+import { enqueueKandakatorSyncDatesIfNeeded } from "@/server/services/kandakator-sync-queue-service";
+import { getTehranWeekDays } from "@/server/services/kandakator-service";
+import { tehranDateKey } from "@/server/memory/kandakator-seed";
+import { kandakatorDateFromKey } from "@/shared/lib/dates";
 
 const bodySchema = z
   .object({
@@ -11,13 +16,25 @@ const bodySchema = z
   .optional();
 
 const RECONCILE_INTERVAL_MS = 5 * 60 * 1000;
+const WEEK_ENQUEUE_INTERVAL_MS = 60 * 60 * 1000;
 let lastReconcileAt = 0;
+let lastWeekEnqueueAt = 0;
 
 function authorize(request: Request) {
   const token = process.env.KANDAKATOR_SYNC_PUSH_TOKEN?.trim();
   if (!token) return false;
   const auth = request.headers.get("authorization");
   return auth === `Bearer ${token}`;
+}
+
+function getNearDates() {
+  const todayKey = tehranDateKey(new Date());
+  const today = kandakatorDateFromKey(todayKey);
+  return [
+    tehranDateKey(addDays(today, -1)),
+    todayKey,
+    tehranDateKey(addDays(today, 1)),
+  ];
 }
 
 export async function POST(request: Request) {
@@ -27,6 +44,18 @@ export async function POST(request: Request) {
     }
 
     const body = bodySchema.parse(await request.json().catch(() => undefined));
+    const source = body?.source ?? "tick-route";
+
+    // Every tick: only yesterday/today/tomorrow (bounded API use).
+    await enqueueKandakatorSyncDatesIfNeeded(getNearDates(), source);
+
+    // Once per hour: full Tehran week discovery for home strip.
+    if (Date.now() - lastWeekEnqueueAt >= WEEK_ENQUEUE_INTERVAL_MS) {
+      const week = getTehranWeekDays().map((day) => day.date);
+      await enqueueKandakatorSyncDatesIfNeeded(week, `${source}:week`);
+      lastWeekEnqueueAt = Date.now();
+    }
+
     const queueResults = await processKandakatorSyncQueue(2);
 
     let reconciliation:
@@ -40,7 +69,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       success: true,
-      source: body?.source ?? "tick-route",
+      source,
       queueProcessed: queueResults.length,
       queueResults,
       reconciliation,

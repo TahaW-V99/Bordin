@@ -1,3 +1,9 @@
+/** Client bundle flag — mirrors isStoreSellEnabled() at build time. */
+export const STORE_SELL_UI_ENABLED =
+  process.env.NEXT_PUBLIC_BORDIN_ENV !== "production" &&
+  (process.env.NEXT_PUBLIC_STORE_SELL_ENABLED === "true" ||
+    process.env.NEXT_PUBLIC_STORE_SELL_ENABLED === "1");
+
 export const BUY_COIN_PACKAGES = [
   { id: "pkg-600", nameFa: "یک مشت سکه ۶۰۰تایی", coinAmount: 600, priceToman: 24_000, sortOrder: 0 },
   { id: "pkg-1200", nameFa: "یک کیسه سکه ۱۲۰۰تایی", coinAmount: 1200, priceToman: 43_000, sortOrder: 1 },

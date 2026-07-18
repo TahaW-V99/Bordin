@@ -357,7 +357,7 @@ async function hasPartialScoresForDate(dateKey: string) {
  * | Past/today all matches settled                | No       | all_settled                    |
  * | Recent COMPLETED within freshness window      | No       | recent_completed_fresh         |
  *
- * *Subject to completed-job freshness suppression (shorter for LIVE, longer for far future).
+ * *Subject to completed-job freshness suppression (shorter for LIVE / awaiting-result, longer for far future).
  */
 export async function evaluateDateSyncNeed(
   input: EvaluateDateSyncNeedInput,
@@ -392,11 +392,18 @@ export async function evaluateDateSyncNeed(
 
   const snapshot = await loadKandakatorSnapshot(dateKey);
 
-  if (!snapshot) {
-    return { shouldEnqueue: true, reason: "discovery" };
-  }
-
-  if (snapshot.matches.length === 0) {
+  if (!snapshot || snapshot.matches.length === 0) {
+    // Avoid discovery thrash when a recent sync already confirmed an empty day.
+    // Keep window short (default 30m) so real fixtures can appear the same day.
+    const completedDiscovery = await getLatestCompletedJob(dateKey);
+    if (completedDiscovery?.lastVerifiedAt) {
+      if (
+        Date.now() - completedDiscovery.lastVerifiedAt.getTime() <
+        freshnessDefaultMs()
+      ) {
+        return { shouldEnqueue: false, reason: "recent_completed_fresh" };
+      }
+    }
     return { shouldEnqueue: true, reason: "discovery" };
   }
 

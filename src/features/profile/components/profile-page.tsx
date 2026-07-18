@@ -20,6 +20,7 @@ import { userNeedsDisplayName } from "@/shared/lib/kandakator-utils";
 import { UserPlus, Share2, Settings, ClipboardList, Users, Trophy, Target } from "lucide-react";
 import { PublicProfileLink } from "@/shared/components/profile/public-profile-link";
 import { AvatarCollectionModal } from "@/features/avatar-collection/components/avatar-collection-modal";
+import { STORE_SELL_UI_ENABLED } from "@/shared/constants/store";
 
 export function ProfilePage() {
   const [data, setData] = useState<Record<string, unknown> | null>(null);
@@ -113,7 +114,7 @@ export function ProfilePage() {
           </Link>
           <div className="flex items-center gap-1.5" dir="ltr">
             <CoinsBalanceLink />
-            <WalletHeaderLink className="h-9 w-9" />
+            {STORE_SELL_UI_ENABLED ? <WalletHeaderLink className="h-9 w-9" /> : null}
             <InboxWhistleLink className="h-9 w-9" />
             {showcaseSlug ? (
               <PublicProfileLink slug={showcaseSlug} ariaLabel="اشتراک‌گذاری ویترین">
@@ -198,7 +199,7 @@ export function ProfilePage() {
           predictionRewardCoins={wallet?.predictionRewardCoins ?? 0}
           systemRewardCoins={wallet?.systemRewardCoins ?? 0}
           purchasedCoins={wallet?.purchasedCoins ?? 0}
-          cashBalanceToman={wallet?.cashBalanceToman}
+          cashBalanceToman={STORE_SELL_UI_ENABLED ? wallet?.cashBalanceToman : undefined}
         />
 
         <div className="grid grid-cols-3 gap-2">

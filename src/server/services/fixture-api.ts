@@ -5,7 +5,7 @@
  */
 
 import { addDays, differenceInCalendarDays, parseISO } from "date-fns";
-import { fromZonedTime } from "date-fns-tz";
+import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 import { TEHRAN_TZ } from "@/shared/lib/dates";
 
 const DEFAULT_API_BASE = "https://api.v1.victoryapi.ir";
@@ -86,6 +86,49 @@ function getFetchTimeoutMs(options?: { noCache?: boolean }) {
   return options?.noCache ? 45_000 : 30_000;
 }
 
+// VictoryAPI plan allows 8000 requests/day; cap well below to keep headroom
+// for manual scripts, restarts, and a safety margin so the quota never fills.
+const DEFAULT_FIXTURE_API_DAILY_BUDGET = 6000;
+
+function fixtureApiDailyBudget() {
+  const raw = process.env.FIXTURE_API_DAILY_BUDGET?.trim();
+  if (!raw) return DEFAULT_FIXTURE_API_DAILY_BUDGET;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0
+    ? Math.floor(parsed)
+    : DEFAULT_FIXTURE_API_DAILY_BUDGET;
+}
+
+const apiBudgetState = { dateKey: "", count: 0, warned: false };
+
+/**
+ * Global per-day VictoryAPI request budget (in-memory, Tehran day).
+ * Returns false once the daily cap is reached so callers degrade to DB data
+ * instead of exhausting the upstream quota. Configure via FIXTURE_API_DAILY_BUDGET.
+ */
+function tryConsumeFixtureApiBudget(): boolean {
+  const today = formatInTimeZone(new Date(), TEHRAN_TZ, "yyyy-MM-dd");
+  if (apiBudgetState.dateKey !== today) {
+    apiBudgetState.dateKey = today;
+    apiBudgetState.count = 0;
+    apiBudgetState.warned = false;
+  }
+
+  const budget = fixtureApiDailyBudget();
+  if (apiBudgetState.count >= budget) {
+    if (!apiBudgetState.warned) {
+      apiBudgetState.warned = true;
+      console.warn(
+        `[Bordin] fixture API daily budget (${budget}) reached for ${today}; serving from DB until reset`,
+      );
+    }
+    return false;
+  }
+
+  apiBudgetState.count += 1;
+  return true;
+}
+
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -124,7 +167,18 @@ function parseApiErrors(json: ApiFixturesResponse | null) {
 }
 
 function normalizeApiFixtures(response: ApiFixturesResponse["response"]): ApiFixture[] {
-  return Array.isArray(response) ? response : [];
+  if (Array.isArray(response)) return response;
+  if (response && typeof response === "object") {
+    // VictoryAPI sometimes returns an id-keyed object instead of an array.
+    return Object.values(response).filter(
+      (row): row is ApiFixture =>
+        !!row &&
+        typeof row === "object" &&
+        "fixture" in row &&
+        "teams" in row,
+    );
+  }
+  return [];
 }
 
 function parseApiJsonBody(raw: unknown): ApiFixturesResponse | null {
@@ -152,9 +206,17 @@ async function fetchFixturesFromApi(
     throw new Error("FIXTURE_API_KEY در env تنظیم نشده است");
   }
 
+  // One budget unit per logical request — retries must not multiply usage.
+  if (!tryConsumeFixtureApiBudget()) {
+    throw new Error("fixture_api_daily_budget_exhausted");
+  }
+
   const url = new URL(`${getApiBase()}/fixtures`);
   for (const [key, value] of Object.entries(params)) {
     url.searchParams.set(key, value);
+  }
+  if (!url.searchParams.has("timezone")) {
+    url.searchParams.set("timezone", TEHRAN_TZ);
   }
 
   for (let attempt = 0; attempt < 3; attempt++) {

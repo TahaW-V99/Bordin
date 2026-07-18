@@ -24,6 +24,7 @@ import {
   isSuspiciousPartialFetch,
 } from "@/server/services/kandakator-sync-safety";
 import { countPublishedMatchesForDate } from "@/server/services/kandakator-display-ingest";
+import { countStaleMatchesForDate } from "@/server/services/kandakator-reconciliation-service";
 
 const PROCESSOR_ID = `kandakator-sync-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
@@ -126,6 +127,12 @@ export async function processOneKandakatorSyncJob() {
         );
         persistedCount = synced.matchCount;
         kandakatorId = synced.kandakatorId;
+      } else {
+        // Real empty day (or temporary API blank): complete once and let freshness
+        // throttle rediscovery. Failing here burned the daily API budget every minute.
+        console.warn(
+          `[Bordin:sync-queue] empty API response for ${job.dateKey} with no existing matches`,
+        );
       }
     } else {
       const synced = await syncDailyKandakatorFromFootballMatches(
@@ -138,6 +145,15 @@ export async function processOneKandakatorSyncJob() {
       );
       persistedCount = synced.matchCount;
       kandakatorId = synced.kandakatorId;
+    }
+
+    // Best-effort: remaining stale scores retry on next freshness window, not hard-fail.
+    // Hard-fail caused API thrash + dead letters while burning the daily budget.
+    const staleAfterSync = await countStaleMatchesForDate(job.dateKey);
+    if (staleAfterSync > 0) {
+      console.warn(
+        `[Bordin:sync-queue] ${job.dateKey} still has ${staleAfterSync} stale match(es) after sync — will retry later`,
+      );
     }
 
     await markKandakatorSyncJobWritten(job.id, {

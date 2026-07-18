@@ -12,6 +12,7 @@ import {
   readStoredUnreadCount,
 } from "@/shared/constants/notifications";
 import { cn } from "@/shared/lib/cn";
+import { STORE_SELL_UI_ENABLED } from "@/shared/constants/store";
 
 export function InboxWhistleLink({ className }: { className?: string }) {
   const pathname = usePathname();
@@ -140,7 +141,7 @@ export function HeaderToolbar() {
   return (
     <div className="flex items-center gap-2">
       <InboxWhistleLink />
-      <WalletHeaderLink />
+      {STORE_SELL_UI_ENABLED ? <WalletHeaderLink /> : null}
       <CoinsBalanceLink />
     </div>
   );

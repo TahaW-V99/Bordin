@@ -12,6 +12,7 @@ import { CoinBreakdown } from "@/shared/components/profile/coin-breakdown";
 import { Modal } from "@/shared/components/ui/modal";
 import { useToast } from "@/shared/components/ui/toast";
 import { formatPersianNumber, formatTehranDateTime } from "@/shared/lib/dates";
+import { STORE_SELL_UI_ENABLED } from "@/shared/constants/store";
 
 type StoreTab = "buy" | "sell";
 type PayMethod = "gateway" | "wallet";
@@ -57,7 +58,7 @@ const SELL_PACKAGE_IMAGE: Record<string, string> = {
   "sell-12000": "/images/store/sell-12000.png",
 };
 
-export function StorePage({ sellTabVisible = true }: { sellTabVisible?: boolean }) {
+export function StorePage({ sellTabVisible = false }: { sellTabVisible?: boolean }) {
   const params = useSearchParams();
   const { toast } = useToast();
   const [tab, setTab] = useState<StoreTab>("buy");
@@ -341,9 +342,11 @@ export function StorePage({ sellTabVisible = true }: { sellTabVisible?: boolean 
             <p className="text-sm text-white/65">
               مبلغ: {formatPersianNumber(selectedPackage.priceToman)} تومان
             </p>
-            <div className="rounded-xl border border-bordin-orange/20 bg-bordin-orange/10 p-3 text-sm">
-              موجودی کیف پول: {formatPersianNumber(wallet?.cashBalanceToman ?? 0)} تومان
-            </div>
+            {STORE_SELL_UI_ENABLED ? (
+              <div className="rounded-xl border border-bordin-orange/20 bg-bordin-orange/10 p-3 text-sm">
+                موجودی کیف پول: {formatPersianNumber(wallet?.cashBalanceToman ?? 0)} تومان
+              </div>
+            ) : null}
             <div className="flex gap-2">
               <Button
                 size="sm"
@@ -352,13 +355,15 @@ export function StorePage({ sellTabVisible = true }: { sellTabVisible?: boolean 
               >
                 درگاه پرداخت
               </Button>
-              <Button
-                size="sm"
-                variant={payMethod === "wallet" ? "primary" : "secondary"}
-                onClick={() => setPayMethod("wallet")}
-              >
-                کیف پول
-              </Button>
+              {STORE_SELL_UI_ENABLED ? (
+                <Button
+                  size="sm"
+                  variant={payMethod === "wallet" ? "primary" : "secondary"}
+                  onClick={() => setPayMethod("wallet")}
+                >
+                  کیف پول
+                </Button>
+              ) : null}
             </div>
             <div className="flex gap-2">
               <Button fullWidth loading={loading} onClick={() => void buy()}>

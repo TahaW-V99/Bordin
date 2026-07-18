@@ -31,6 +31,7 @@
     "recover:kandakator:production": "node scripts/recover-kandakator.mjs production",
     "recover:kandakator:production:shell": "liara shell --app bordin --command \"node prisma/recover-kandakator-liara.mjs\"",
     "fix:france-spain:production": "node scripts/fix-france-spain-production-liara.mjs",
+    "fix:england-argentina:production": "node scripts/fix-england-argentina-production-liara.mjs",
     "rescore:predictions:production:shell": "liara shell --app bordin --command \"node prisma/rescore-predictions-liara.mjs\"",
     "cf:open:install": "npm install --prefix workers/bordin-open",
     "cf:open:deploy": "npm run deploy --prefix workers/bordin-open",

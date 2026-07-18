@@ -1,4 +1,5 @@
 # به‌روزرسانی خودکار کنداکتور: صف همگام‌سازی را روی برنامه enqueue می‌کند
+# (برنامه خودش داده را از VictoryAPI می‌گیرد — سرور لیارا به VictoryAPI دسترسی دارد).
 #
 # تنظیم یک‌باره در GitHub → Settings → Secrets → Actions:
 #   KANDAKATOR_SYNC_PUSH_TOKEN

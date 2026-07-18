@@ -148,9 +148,18 @@ export function resolveSocialShareOrigin(request?: Pick<Request, "headers">): st
 }
 
 /**
- * Store "sell coins" tab — hidden unless STORE_SELL_ENABLED=true in env.
+ * Coin sell + cash wallet — disabled on production (bordin.ir).
+ * On staging/dev, set STORE_SELL_ENABLED=true to enable.
  */
-export function isStoreSellTabVisibleForHost(_hostname?: string): boolean {
+export function isStoreSellEnabled(hostname?: string): boolean {
+  if (isProductionEnvironment()) return false;
+  if (hostname && isBordinIrHost(hostname)) return false;
+
   const env = process.env.STORE_SELL_ENABLED?.trim().toLowerCase();
   return env === "true" || env === "1";
+}
+
+/** @deprecated Use isStoreSellEnabled */
+export function isStoreSellTabVisibleForHost(hostname?: string): boolean {
+  return isStoreSellEnabled(hostname);
 }

@@ -1,4 +1,5 @@
 import { withAuth, jsonOk } from "@/shared/lib/api-route";
+import { isStoreSellEnabled } from "@/shared/lib/environment";
 import {
   getCoinPackages,
   getPurchaseHistory,
@@ -8,7 +9,7 @@ import {
 
 export const GET = withAuth(async (userId) => {
   const packages = await getCoinPackages();
-  const sellPackages = await getSellPackages();
+  const sellPackages = isStoreSellEnabled() ? await getSellPackages() : [];
 
   let wallet = null;
   let purchaseHistory: Awaited<ReturnType<typeof getPurchaseHistory>> = [];
