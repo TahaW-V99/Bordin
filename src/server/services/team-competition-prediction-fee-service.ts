@@ -132,9 +132,16 @@ function resolveKnockoutFeeForMatch(
   return null;
 }
 
+/**
+ * Entry fee for a daily-kandakator prediction on this match.
+ *
+ * Standard matches (not part of any Team Competition — and, once implemented, Cup or
+ * Tournament) are FREE and return 0. A match only carries a fee when it belongs to a
+ * competition, in which case the fee is read from that competition's admin settings.
+ * Future Cup/Tournament support can add their own branches here without rewriting callers.
+ */
 function resolveFeeForMatch(
   match: MatchForPredictionFee,
-  defaultFee: number,
   comps: Awaited<ReturnType<typeof getUserActiveRegisteredTeamCompetitions>>,
   legacyRankingMatchIds: Map<string, Set<string>>,
   legacyKnockoutMatchIds: Map<string, Set<string>>,
@@ -165,18 +172,20 @@ function resolveFeeForMatch(
     }
   }
 
-  return defaultFee;
+  return 0;
 }
 
-/** Per-match daily prediction fee; team-comp ranking/knockout fee when applicable. */
+/**
+ * Per-match daily prediction fee. Standard matches are free (0); a fee only applies to
+ * matches that belong to a competition (currently Team Competition ranking/knockout).
+ */
 export async function resolveDailyPredictionEntryFeesForMatches(
   userId: string,
   matches: MatchForPredictionFee[],
-  defaultFee: number,
 ): Promise<Map<string, number>> {
   const result = new Map<string, number>();
   for (const match of matches) {
-    result.set(match.id, defaultFee);
+    result.set(match.id, 0);
   }
 
   if (matches.length === 0 || (await shouldUseMemoryDb())) {
@@ -193,7 +202,7 @@ export async function resolveDailyPredictionEntryFeesForMatches(
   for (const match of matches) {
     result.set(
       match.id,
-      resolveFeeForMatch(match, defaultFee, comps, legacyRankingMatchIds, legacyKnockoutMatchIds),
+      resolveFeeForMatch(match, comps, legacyRankingMatchIds, legacyKnockoutMatchIds),
     );
   }
 
@@ -203,8 +212,7 @@ export async function resolveDailyPredictionEntryFeesForMatches(
 export async function resolveDailyPredictionEntryFee(
   userId: string,
   match: MatchForPredictionFee,
-  defaultFee: number,
 ): Promise<number> {
-  const fees = await resolveDailyPredictionEntryFeesForMatches(userId, [match], defaultFee);
-  return fees.get(match.id) ?? defaultFee;
+  const fees = await resolveDailyPredictionEntryFeesForMatches(userId, [match]);
+  return fees.get(match.id) ?? 0;
 }

@@ -286,7 +286,12 @@ export function MatchPredictionCard({
         }
         throw new Error(data.error);
       }
-      toast(`پیش‌بینی ثبت شد! ${formatPersianNumber(entryFeeCoins)} سکه کسر شد.`, "success");
+      toast(
+        entryFeeCoins > 0
+          ? `پیش‌بینی ثبت شد! ${formatPersianNumber(entryFeeCoins)} سکه کسر شد.`
+          : "پیش‌بینی ثبت شد!",
+        "success",
+      );
       setLocalPrediction({
         homePrediction: home,
         awayPrediction: away,
@@ -449,9 +454,13 @@ export function MatchPredictionCard({
 
         <div className="flex flex-col gap-2 text-xs">
           <div className="flex items-center justify-between">
-            <span className="inline-flex animate-pulse items-center rounded-full border border-bordin-orange/35 bg-bordin-orange/12 px-2.5 py-1 text-[11px] font-semibold text-bordin-orange shadow-[0_0_18px_rgba(255,138,76,0.14)]">
-              هزینه ورودی: {formatPersianNumber(entryFeeCoins)} سکه
-            </span>
+            {entryFeeCoins > 0 ? (
+              <span className="inline-flex animate-pulse items-center rounded-full border border-bordin-orange/35 bg-bordin-orange/12 px-2.5 py-1 text-[11px] font-semibold text-bordin-orange shadow-[0_0_18px_rgba(255,138,76,0.14)]">
+                هزینه ورودی: {formatPersianNumber(entryFeeCoins)} سکه
+              </span>
+            ) : (
+              <span />
+            )}
             {!gameEnded ? (
               <span
                 className={isClosed ? "text-red-400" : "text-bordin-orange"}

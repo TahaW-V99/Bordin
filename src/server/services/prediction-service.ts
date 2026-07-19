@@ -1,5 +1,4 @@
 import {
-  AdminConfigKey,
   CoinTransactionType,
   CoinType,
   CompetitionType,
@@ -59,17 +58,12 @@ export async function submitDailyPrediction(
       throw new Error("شما قبلاً برای این مسابقه پیش‌بینی ثبت کرده‌اید");
     }
 
-    const defaultFee = kandakator?.entryFeeCoins ?? devMemoryDb.config.dailyPredictionCost();
-    const entryFee = await resolveDailyPredictionEntryFee(
-      userId,
-      {
-        id: matchId,
-        kickoffAt: km.match.kickoffAt,
-        leagueName: km.match.leagueName,
-        externalId: parseFixtureExternalId(km.matchId) ? km.matchId : null,
-      },
-      defaultFee,
-    );
+    const entryFee = await resolveDailyPredictionEntryFee(userId, {
+      id: matchId,
+      kickoffAt: km.match.kickoffAt,
+      leagueName: km.match.leagueName,
+      externalId: parseFixtureExternalId(km.matchId) ? km.matchId : null,
+    });
     const wallet = devMemoryDb.wallet.getByUserId(userId);
     const total =
       (wallet?.predictionRewardCoins ?? 0) +
@@ -79,7 +73,9 @@ export async function submitDailyPrediction(
       throw new Error("موجودی سکه کافی نیست");
     }
 
-    devMemoryDb.wallet.deductForPrediction(userId, entryFee);
+    if (entryFee > 0) {
+      devMemoryDb.wallet.deductForPrediction(userId, entryFee);
+    }
     const prediction = devMemoryDb.predictions.create({
       userId,
       matchId,
@@ -128,23 +124,12 @@ export async function submitDailyPrediction(
     throw new Error("شما قبلاً برای این مسابقه پیش‌بینی ثبت کرده‌اید");
   }
 
-  const costConfig = await prisma.adminConfig.findUnique({
-    where: { key: AdminConfigKey.DAILY_PREDICTION_COST },
+  const entryFee = await resolveDailyPredictionEntryFee(userId, {
+    id: kandakatorMatch.match.id,
+    kickoffAt: kandakatorMatch.match.kickoffAt,
+    leagueName: kandakatorMatch.match.leagueName,
+    externalId: kandakatorMatch.match.externalId,
   });
-  const defaultFee =
-    kandakatorMatch.kandakator.entryFeeCoins ??
-    ((costConfig?.value as number) ?? 600);
-
-  const entryFee = await resolveDailyPredictionEntryFee(
-    userId,
-    {
-      id: kandakatorMatch.match.id,
-      kickoffAt: kandakatorMatch.match.kickoffAt,
-      leagueName: kandakatorMatch.match.leagueName,
-      externalId: kandakatorMatch.match.externalId,
-    },
-    defaultFee,
-  );
 
   const wallet = await prisma.coinWallet.findUnique({ where: { userId } });
   if (!wallet) throw new Error("کیف پول یافت نشد");
@@ -157,51 +142,54 @@ export async function submitDailyPrediction(
   }
 
   return prisma.$transaction(async (tx) => {
-    let remaining = entryFee;
-    let predDeduct = 0;
-    let sysDeduct = 0;
-    let purchDeduct = 0;
+    // Free (standard) matches: no coins are deducted and no entry transaction is recorded.
+    if (entryFee > 0) {
+      let remaining = entryFee;
+      let predDeduct = 0;
+      let sysDeduct = 0;
+      let purchDeduct = 0;
 
-    const spendFrom = (
-      available: number,
-      type: "pred" | "sys" | "purch",
-    ) => {
-      const take = Math.min(available, remaining);
-      remaining -= take;
-      if (type === "pred") predDeduct += take;
-      if (type === "sys") sysDeduct += take;
-      if (type === "purch") purchDeduct += take;
-    };
+      const spendFrom = (
+        available: number,
+        type: "pred" | "sys" | "purch",
+      ) => {
+        const take = Math.min(available, remaining);
+        remaining -= take;
+        if (type === "pred") predDeduct += take;
+        if (type === "sys") sysDeduct += take;
+        if (type === "purch") purchDeduct += take;
+      };
 
-    spendFrom(wallet.purchasedCoins, "purch");
-    spendFrom(wallet.systemRewardCoins, "sys");
-    spendFrom(wallet.predictionRewardCoins, "pred");
+      spendFrom(wallet.purchasedCoins, "purch");
+      spendFrom(wallet.systemRewardCoins, "sys");
+      spendFrom(wallet.predictionRewardCoins, "pred");
 
-    const updatedWallet = await tx.coinWallet.update({
-      where: { userId },
-      data: {
-        purchasedCoins: wallet.purchasedCoins - purchDeduct,
-        systemRewardCoins: wallet.systemRewardCoins - sysDeduct,
-        predictionRewardCoins: wallet.predictionRewardCoins - predDeduct,
-      },
-    });
+      const updatedWallet = await tx.coinWallet.update({
+        where: { userId },
+        data: {
+          purchasedCoins: wallet.purchasedCoins - purchDeduct,
+          systemRewardCoins: wallet.systemRewardCoins - sysDeduct,
+          predictionRewardCoins: wallet.predictionRewardCoins - predDeduct,
+        },
+      });
 
-    const newBalance =
-      updatedWallet.predictionRewardCoins +
-      updatedWallet.systemRewardCoins +
-      updatedWallet.purchasedCoins;
+      const newBalance =
+        updatedWallet.predictionRewardCoins +
+        updatedWallet.systemRewardCoins +
+        updatedWallet.purchasedCoins;
 
-    await tx.coinTransaction.create({
-      data: {
-        walletId: updatedWallet.id,
-        coinType: CoinType.PURCHASED,
-        amount: -entryFee,
-        balanceAfter: newBalance,
-        type: CoinTransactionType.PREDICTION_ENTRY,
-        referenceId: matchId,
-        description: "ورودی پیش‌بینی روزانه",
-      },
-    });
+      await tx.coinTransaction.create({
+        data: {
+          walletId: updatedWallet.id,
+          coinType: CoinType.PURCHASED,
+          amount: -entryFee,
+          balanceAfter: newBalance,
+          type: CoinTransactionType.PREDICTION_ENTRY,
+          referenceId: matchId,
+          description: "ورودی پیش‌بینی روزانه",
+        },
+      });
+    }
 
     const prediction = await tx.prediction.create({
       data: {

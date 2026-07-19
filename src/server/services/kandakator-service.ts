@@ -318,7 +318,6 @@ async function buildKandakatorDto(
       leagueName: km.match.leagueName,
       externalId: km.match.externalId,
     })),
-    defaultFee,
   );
   const badgeByMatchId = await resolveTeamCompetitionBadgesForMatches(
     userId,
