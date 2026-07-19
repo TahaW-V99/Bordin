@@ -2,84 +2,130 @@
 
 This project keeps the existing Liara apps and URLs unchanged:
 
-- Production: `https://bordin.ir`
-- Test/Staging: `https://bordintest.ir`
+- Production: `https://bordin.ir` (Liara app `bordin`)
+- Test/Staging: `https://bordintest.ir` (Liara app `bordintest`)
+
+Production and staging have **separate servers and separate databases**. The only
+thing this workflow controls is **which branch is allowed to deploy where**.
 
 ## Branch Rules
 
-- `main` is the only stable release branch.
-- Every new feature must be developed on its own feature branch.
-- Feature branches can be deployed to `bordintest.ir` for testing.
-- Feature branches must never be deployed to `bordin.ir` unless they are merged into `main`.
-- Urgent fixes can be made on `main` and deployed directly to production without including unfinished feature branches.
+- `main` is the **production** branch. Only tested, approved code lives here.
+- `develop` is the **staging/integration** branch. All features are integrated here first.
+- Every new feature is built on its own `feature/*` branch, created from `develop`.
+- `bordin.ir` (production) deploys **only** from `main`.
+- `bordintest.ir` (staging) deploys **only** from `develop` (feature previews are opt-in, see below).
+- Unfinished work never touches `main`, so it can never reach production.
+
+```
+feature/*  ──merge──►  develop  ──deploy:staging──►  bordintest.ir
+                           │
+                           └──merge (when approved)──►  main  ──deploy:production──►  bordin.ir
+```
 
 ## Commands
 
-### Deploy production
+### Deploy production (main only)
 
 ```bash
+git checkout main
 npm run deploy:production
 ```
 
-This command is guarded and only allows deploy when the current branch is `main` (or `master` for legacy compatibility).
+Guarded: only runs when the current branch is `main` (or `master` for legacy compatibility).
 
-If you intentionally need to bypass the guard:
+Emergency bypass (recovery only):
 
 ```bash
 npm run deploy:production:force
 ```
 
-Use this only for exceptional/manual recovery situations.
-
-### Deploy test/staging from the current branch
+### Deploy staging (develop only)
 
 ```bash
+git checkout develop
 npm run deploy:staging
 ```
 
-This deploys the code currently checked out in your working tree to `https://bordintest.ir`.
+Guarded: by default only runs when the current branch is `develop`.
 
-### Deploy test/staging from a selected feature branch
+### Deploy a feature branch to staging (opt-in preview)
 
-First checkout the feature branch locally, then run:
+To preview a single feature on staging without merging it into `develop` yet:
 
 ```bash
+git checkout feature/my-work
 npm run deploy:staging -- --branch=feature/my-work
 ```
 
-The extra `--branch=...` flag does not switch branches for you. It verifies that the branch you selected is the branch currently checked out, so you do not accidentally deploy the wrong code to staging.
+The `--branch=...` flag does not switch branches. It asserts that the branch you
+named is the one currently checked out, so you never deploy the wrong code.
+
+Emergency bypass for staging (skips the branch check):
+
+```bash
+npm run deploy:staging -- --force
+# or: ALLOW_STAGING_DEPLOY=1 npm run deploy:staging
+```
 
 ### Deploy the same approved code to both environments
 
 ```bash
+git checkout main
 npm run deploy:both
 ```
 
-This deploys staging first, then production. Production is still blocked unless the current branch is `main`.
+This is a **production release**: it is gated on `main` and deploys that exact
+code to staging first, then production.
 
-## Recommended Future Workflow
+## Standard Workflow
 
-1. Create a new feature branch from `main`.
-2. Build the feature only on that branch.
-3. Deploy that branch to `bordintest.ir` with `npm run deploy:staging`.
-4. Continue other unfinished features in other separate branches if needed.
-5. For urgent production fixes, work on `main` and deploy with `npm run deploy:production`.
-6. After a feature is approved on staging, merge it into `main`.
-7. Deploy `main` to `bordin.ir`.
+```bash
+# 1) Start a feature from develop
+git checkout develop
+git pull origin develop
+git checkout -b feature/my-work
+# ...commit work...
+git push -u origin feature/my-work
+
+# 2) Integrate into develop when ready (PR preferred)
+git checkout develop
+git pull origin develop
+git merge --no-ff feature/my-work
+git push origin develop
+
+# 3) Test on staging
+git checkout develop
+npm run deploy:staging      # → bordintest.ir
+
+# 4) Promote to production once approved (PR preferred)
+git checkout main
+git pull origin main
+git merge --no-ff develop
+git push origin main
+
+# 5) Release
+git checkout main
+npm run deploy:production    # → bordin.ir
+```
+
+Urgent hotfixes: make the fix on `main`, deploy production, then merge `main`
+back into `develop` so both branches stay in sync.
+
+## Configuration Notes
+
+- Branch policy is enforced in `scripts/liara-deploy.mjs` (Git + deploy script).
+  Liara itself has no branch binding — deploys ship the locally checked-out files.
+- Override branch names if ever needed via env: `PRODUCTION_BRANCH`, `STAGING_BRANCH`.
+- `liara.json` / `liara.staging.json` only select the Liara app; they are unchanged.
 
 ## What This Changes
 
-This workflow only separates deploy source by branch.
+This workflow only separates deploy source by branch. It does **not** change:
 
-It does **not** change:
-
-- domains
+- domains, DNS, SSL, routing
 - Liara app names
-- DNS
-- SSL
-- routing
-- application behavior
-- database logic
+- application / business logic
+- API behavior
+- database schemas
 - CI/CD architecture
-
-The existing deploy target configuration remains the same; only the branch safety around deploy commands is improved.

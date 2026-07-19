@@ -8,7 +8,7 @@
  *   node scripts/liara-deploy.mjs both
  *
  * Production always deploys from main only (unless you intentionally --force).
- * Staging can deploy from any branch, and can optionally assert the selected branch.
+ * Staging deploys from develop by default; use --branch=<feature> to preview a feature branch.
  */
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
@@ -16,9 +16,12 @@ import path from "node:path";
 
 const PRODUCTION_BRANCH = process.env.PRODUCTION_BRANCH || "main";
 const ALLOWED_PRODUCTION_BRANCHES = new Set([PRODUCTION_BRANCH, "master"]);
+const STAGING_BRANCH = process.env.STAGING_BRANCH || "develop";
 
 const target = process.argv[2];
-const force = process.argv.includes("--force") || process.env.ALLOW_PRODUCTION_DEPLOY === "1";
+const forceFlag = process.argv.includes("--force");
+const force = forceFlag || process.env.ALLOW_PRODUCTION_DEPLOY === "1";
+const stagingForce = forceFlag || process.env.ALLOW_STAGING_DEPLOY === "1";
 const selectedBranchArg = process.argv.find((arg) => arg.startsWith("--branch="));
 const selectedBranch = selectedBranchArg?.slice("--branch=".length)?.trim() || null;
 
@@ -104,32 +107,51 @@ function assertProductionDeployAllowed() {
   }
 }
 
-function assertSelectedStagingBranch() {
+function assertStagingDeployAllowed() {
   const branch = getCurrentBranch();
 
-  if (!selectedBranch) {
-    if (branch) {
-      console.log(`✓ Staging deploy source: current branch "${branch}".`);
-    } else {
-      console.warn("⚠ Could not detect current branch; staging deploy will continue.");
+  // Explicit feature-branch preview: only verify the selected branch is the one checked out.
+  if (selectedBranch) {
+    if (!branch) {
+      console.error("❌ Staging deploy blocked: current branch could not be detected.");
+      console.error(`   Switch to "${selectedBranch}" and re-run:`);
+      console.error(`   npm run deploy:staging -- --branch=${selectedBranch}`);
+      process.exit(1);
     }
+
+    if (branch !== selectedBranch) {
+      console.error(`❌ Staging deploy blocked: selected branch is "${selectedBranch}" but current branch is "${branch}".`);
+      console.error("   Checkout the intended feature branch first, then deploy staging again.");
+      process.exit(1);
+    }
+
+    console.log(`✓ Staging deploy source locked to feature branch "${branch}".`);
+    return;
+  }
+
+  if (stagingForce) {
+    console.warn("⚠ Staging deploy: branch check skipped (--force / ALLOW_STAGING_DEPLOY=1).");
     return;
   }
 
   if (!branch) {
-    console.error("❌ Staging deploy blocked: current branch could not be detected.");
-    console.error(`   Switch to "${selectedBranch}" and re-run:`);
-    console.error(`   npm run deploy:staging -- --branch=${selectedBranch}`);
+    console.error("❌ Staging deploy blocked: git is not available / current branch could not be detected.");
+    console.error(`   Checkout "${STAGING_BRANCH}", or preview a feature branch explicitly:`);
+    console.error("   npm run deploy:staging -- --branch=<feature-branch>");
     process.exit(1);
   }
 
-  if (branch !== selectedBranch) {
-    console.error(`❌ Staging deploy blocked: selected branch is "${selectedBranch}" but current branch is "${branch}".`);
-    console.error("   Checkout the intended feature branch first, then deploy staging again.");
+  if (branch !== STAGING_BRANCH) {
+    console.error(`❌ Staging deploy blocked: current branch is "${branch}".`);
+    console.error(`   bordintest.ir deploys from "${STAGING_BRANCH}" by default (integration branch).`);
+    console.error("");
+    console.error("   Options:");
+    console.error(`   • Switch to ${STAGING_BRANCH}:  git checkout ${STAGING_BRANCH}  →  npm run deploy:staging`);
+    console.error("   • Preview one feature branch:  npm run deploy:staging -- --branch=<feature-branch>");
     process.exit(1);
   }
 
-  console.log(`✓ Staging deploy source locked to branch "${branch}".`);
+  console.log(`✓ Branch "${branch}" — staging deploy allowed.`);
 }
 
 function liaraDeploy(staging) {
@@ -156,7 +178,7 @@ if (!target || !["staging", "production", "both"].includes(target)) {
 }
 
 if (target === "staging") {
-  assertSelectedStagingBranch();
+  assertStagingDeployAllowed();
   liaraDeploy(true);
   process.exit(0);
 }
@@ -167,8 +189,8 @@ if (target === "production") {
   process.exit(0);
 }
 
-// both: staging first (any branch), then production (main only)
-assertSelectedStagingBranch();
-liaraDeploy(true);
+// both: release the SAME approved code to both apps. This is a production release,
+// so it is gated on the production branch (main) and deployed to staging + production.
 assertProductionDeployAllowed();
+liaraDeploy(true);
 liaraDeploy(false);
