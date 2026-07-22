@@ -596,7 +596,6 @@ export async function fetchMatchesForTehranDate(
   options?: { noCache?: boolean; skipLocalization?: boolean },
 ) {
   // Date path first (1 request) so a VictoryAPI league outage cannot block the day.
-  // League+season then merges extras (VictoryAPI recommendation for ongoing comps).
   let fromDate: FixtureMatch[] = [];
   if (shouldUseDateFixtureFallback()) {
     try {
@@ -612,9 +611,19 @@ export async function fetchMatchesForTehranDate(
     }
   }
 
+  // League+season enrichment with a hard deadline so queue ticks never hang to 504.
+  const leagueBudgetMs = options?.noCache ? 12_000 : 25_000;
   let fromLeagues: FixtureMatch[] = [];
   try {
-    fromLeagues = await fetchMatchesForTehranDateFromLeagues(tehranDateKey, options);
+    fromLeagues = await Promise.race([
+      fetchMatchesForTehranDateFromLeagues(tehranDateKey, options),
+      sleep(leagueBudgetMs).then(() => {
+        console.warn(
+          `[Bordin] league+season discovery timed out after ${leagueBudgetMs}ms for ${tehranDateKey}`,
+        );
+        return [] as FixtureMatch[];
+      }),
+    ]);
   } catch (error) {
     console.warn(
       `[Bordin] league+season discovery failed for ${tehranDateKey}:`,
@@ -622,12 +631,7 @@ export async function fetchMatchesForTehranDate(
     );
   }
 
-  const merged = mergeFixtureMatches(fromLeagues, fromDate);
-  if (merged.length === 0 && fromDate.length === 0 && fromLeagues.length === 0) {
-    // Re-throw only when both paths produced nothing and date was required.
-    if (!shouldUseDateFixtureFallback()) return fromLeagues;
-  }
-  return merged;
+  return mergeFixtureMatches(fromLeagues, fromDate);
 }
 
 export function mapFixtureStatus(
