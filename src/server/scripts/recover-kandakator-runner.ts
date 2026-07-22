@@ -159,7 +159,10 @@ export async function runRecoverKandakator(options: RecoverKandakatorOptions) {
     let method = "skip";
 
     try {
-      const matches = await fetchMatchesForTehranDate(dateKey, { noCache: true });
+      const matches = await fetchMatchesForTehranDate(dateKey, {
+        noCache: true,
+        skipLocalization: true,
+      });
 
       if (canUseLocalDb) {
         const result = await syncDailyKandakatorFromFootballMatches(dateKey, matches, {
