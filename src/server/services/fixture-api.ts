@@ -564,7 +564,12 @@ function mergeFixtureMatches(...groups: FixtureMatch[][]) {
 export async function fetchMatchesByLeagueSeason(
   leagueId: number,
   season: number,
-  options?: { noCache?: boolean; skipLocalization?: boolean; forceRefresh?: boolean },
+  options?: {
+    noCache?: boolean;
+    skipLocalization?: boolean;
+    forceRefresh?: boolean;
+    shortTimeoutMs?: number;
+  },
 ) {
   const cacheKey = `${leagueId}:${season}:loc=${options?.skipLocalization ? "0" : "1"}`;
   const ttl = seasonCacheTtlMs();
@@ -576,7 +581,11 @@ export async function fetchMatchesByLeagueSeason(
   // VictoryAPI fixtures docs: leagueId + season (not "league").
   const matches = await fetchFixturesFromApi(
     { leagueId: String(leagueId), season: String(season) },
-    options,
+    {
+      ...options,
+      // League discovery must fail fast per league so the day can finish.
+      shortTimeoutMs: options?.shortTimeoutMs ?? 12_000,
+    },
   );
   seasonFixtureCache.set(cacheKey, { fetchedAt: Date.now(), matches });
   return matches;
@@ -637,10 +646,9 @@ function shouldUseDateFixtureFallback() {
 }
 
 function leagueDiscoveryBudgetMs(options?: { noCache?: boolean }, dateHitCount = 0) {
-  // Cold cache needs room to warm ~12 leagues (then later days are cache hits).
-  // When date path already returned fixtures, keep league enrich shorter.
-  if (dateHitCount > 0) return options?.noCache ? 15_000 : 20_000;
-  return options?.noCache ? 40_000 : 35_000;
+  // Bound wall-clock so /tick never trips the reverse-proxy gateway.
+  if (dateHitCount > 0) return options?.noCache ? 12_000 : 18_000;
+  return options?.noCache ? 25_000 : 30_000;
 }
 
 export async function fetchMatchesForTehranDate(
