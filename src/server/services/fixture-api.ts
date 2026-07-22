@@ -535,14 +535,14 @@ async function fetchMatchesForTehranDateFromLeagues(
 
   for (const leagueId of leagues) {
     try {
-      // Prefer heuristic season first to avoid an extra /leagues call per id
-      // when the upstream is already unstable. API current-season is used only
-      // when FIXTURE_API_SEASON_LOOKUP=true.
-      const season =
-        process.env.FIXTURE_API_SEASON_LOOKUP?.trim().toLowerCase() === "true" ||
-        process.env.FIXTURE_API_SEASON_LOOKUP?.trim() === "1"
-          ? await resolveSeasonForLeague(leagueId, tehranDateKey)
-          : resolveFixtureSeasonForDate(tehranDateKey);
+      // Prefer VictoryAPI current season per league (calendar-year leagues like
+      // Brazil differ from European Aug–May seasons). Heuristic is fallback only.
+      const lookup =
+        process.env.FIXTURE_API_SEASON_LOOKUP?.trim().toLowerCase() !== "false" &&
+        process.env.FIXTURE_API_SEASON_LOOKUP?.trim() !== "0";
+      const season = lookup
+        ? await resolveSeasonForLeague(leagueId, tehranDateKey)
+        : resolveFixtureSeasonForDate(tehranDateKey);
 
       const rows = await fetchMatchesByLeagueSeason(leagueId, season, options);
       consecutiveUpstreamFailures = 0;
