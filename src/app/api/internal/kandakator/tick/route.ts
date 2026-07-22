@@ -51,16 +51,14 @@ export async function POST(request: Request) {
     await enqueueKandakatorSyncDatesIfNeeded(getNearDates(), source);
 
     // Frequently: full Tehran week so home strip fills with plan-covered fixtures.
-    let weekEnqueued = false;
     if (Date.now() - lastWeekEnqueueAt >= WEEK_ENQUEUE_INTERVAL_MS) {
       const week = getTehranWeekDays().map((day) => day.date);
       await enqueueKandakatorSyncDatesIfNeeded(week, `${source}:week`);
       lastWeekEnqueueAt = Date.now();
-      weekEnqueued = true;
     }
 
-    // Process enough jobs to cover near dates, and the full week when rediscovered.
-    const queueResults = await processKandakatorSyncQueue(weekEnqueued ? 7 : 3);
+    // Keep batch small to avoid gateway 504/502 while league caches warm.
+    const queueResults = await processKandakatorSyncQueue(3);
 
     let reconciliation:
       | Awaited<ReturnType<typeof runKandakatorReconciliation>>
