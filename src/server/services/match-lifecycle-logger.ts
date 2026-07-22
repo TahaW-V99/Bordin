@@ -93,6 +93,7 @@ export async function logReconcileEvent(input: {
   partialScoreCount: number;
   datesTriggered: string[];
   settledCount: number;
+  idRefreshCount?: number;
   durationMs: number;
   status: "success" | "partial" | "failed";
   errorMessage?: string;

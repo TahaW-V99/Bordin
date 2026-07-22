@@ -373,9 +373,11 @@ async function scoreOrRescorePredictionRecord(input: {
     return true;
   }
 
-  await prisma.$transaction(async (tx) => {
-    await tx.prediction.update({
-      where: { id: input.predictionId },
+  // Claim first-time settlement atomically — prevents concurrent sync/settle
+  // from granting coins / XP / medals twice for the same prediction.
+  const claimed = await prisma.$transaction(async (tx) => {
+    const claim = await tx.prediction.updateMany({
+      where: { id: input.predictionId, scoredAt: null },
       data: {
         accuracyPercent: accuracy,
         coinsEarned: reward.coins,
@@ -383,6 +385,7 @@ async function scoreOrRescorePredictionRecord(input: {
         scoredAt: new Date(),
       },
     });
+    if (claim.count === 0) return false;
 
     if (accuracy === 100) {
       await tx.userProfile.update({
@@ -390,7 +393,28 @@ async function scoreOrRescorePredictionRecord(input: {
         data: { perfectPredictions: { increment: 1 } },
       });
     }
+    return true;
   });
+
+  if (!claimed) {
+    const existing = await prisma.prediction.findUnique({
+      where: { id: input.predictionId },
+      select: {
+        scoredAt: true,
+        accuracyPercent: true,
+        coinsEarned: true,
+        xpEarned: true,
+      },
+    });
+    if (!existing?.scoredAt) return false;
+    return scoreOrRescorePredictionRecord({
+      ...input,
+      alreadyScored: true,
+      previousAccuracy: existing.accuracyPercent,
+      previousCoins: existing.coinsEarned,
+      previousXp: existing.xpEarned,
+    });
+  }
 
   if (accuracy === 100) {
     const { publishPerfectPredictionSystemMessage } = await import(
