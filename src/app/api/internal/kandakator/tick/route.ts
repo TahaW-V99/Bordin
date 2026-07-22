@@ -17,7 +17,7 @@ const bodySchema = z
   .optional();
 
 const RECONCILE_INTERVAL_MS = 5 * 60 * 1000;
-const WEEK_ENQUEUE_INTERVAL_MS = 60 * 60 * 1000;
+const WEEK_ENQUEUE_INTERVAL_MS = 15 * 60 * 1000;
 let lastReconcileAt = 0;
 let lastWeekEnqueueAt = 0;
 
@@ -50,14 +50,17 @@ export async function POST(request: Request) {
     // Every tick: only yesterday/today/tomorrow (bounded API use).
     await enqueueKandakatorSyncDatesIfNeeded(getNearDates(), source);
 
-    // Once per hour: full Tehran week discovery for home strip.
+    // Frequently: full Tehran week so home strip fills with plan-covered fixtures.
+    let weekEnqueued = false;
     if (Date.now() - lastWeekEnqueueAt >= WEEK_ENQUEUE_INTERVAL_MS) {
       const week = getTehranWeekDays().map((day) => day.date);
       await enqueueKandakatorSyncDatesIfNeeded(week, `${source}:week`);
       lastWeekEnqueueAt = Date.now();
+      weekEnqueued = true;
     }
 
-    const queueResults = await processKandakatorSyncQueue(2);
+    // Process enough jobs to cover near dates, and the full week when rediscovered.
+    const queueResults = await processKandakatorSyncQueue(weekEnqueued ? 7 : 3);
 
     let reconciliation:
       | Awaited<ReturnType<typeof runKandakatorReconciliation>>

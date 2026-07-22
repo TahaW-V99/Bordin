@@ -362,6 +362,11 @@ const DEFAULT_COVERED_LEAGUE_IDS = [
   2, 3, 39, 61, 71, 72, 78, 88, 94, 135, 140, 290,
 ];
 
+/** Calendar-year competitions (Jan–Dec), not European Aug–May campaigns. */
+const CALENDAR_YEAR_LEAGUE_IDS = new Set([71, 72]);
+
+const LEAGUE_FETCH_CONCURRENCY = 4;
+
 type SeasonCacheEntry = { fetchedAt: number; matches: FixtureMatch[] };
 const seasonFixtureCache = new Map<string, SeasonCacheEntry>();
 
@@ -401,6 +406,49 @@ export function resolveFixtureSeasonForDate(tehranDateKey: string): number {
   // API-Football / VictoryAPI season = start year of the campaign.
   // European leagues: Aug–May. Until July inclusive, use previous calendar year.
   return month >= 8 ? year : year - 1;
+}
+
+/**
+ * Season year for a configured league without an extra /leagues round-trip.
+ * Brazil (71/72) uses calendar year; European leagues use Aug–May heuristic.
+ */
+export function resolveSeasonForConfiguredLeague(
+  leagueId: number,
+  tehranDateKey: string,
+): number {
+  const forced = process.env.FIXTURE_API_SEASON?.trim();
+  if (forced) {
+    const year = Number(forced);
+    if (Number.isFinite(year) && year >= 2000) return Math.floor(year);
+  }
+  if (CALENDAR_YEAR_LEAGUE_IDS.has(leagueId)) {
+    const year = Number(tehranDateKey.slice(0, 4));
+    return Number.isFinite(year) && year >= 2000 ? year : new Date().getFullYear();
+  }
+  return resolveFixtureSeasonForDate(tehranDateKey);
+}
+
+async function mapPool<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T) => Promise<R>,
+): Promise<R[]> {
+  if (items.length === 0) return [];
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+
+  async function runWorker() {
+    while (true) {
+      const index = nextIndex;
+      nextIndex += 1;
+      if (index >= items.length) return;
+      results[index] = await worker(items[index]!);
+    }
+  }
+
+  const poolSize = Math.max(1, Math.min(concurrency, items.length));
+  await Promise.all(Array.from({ length: poolSize }, () => runWorker()));
+  return results;
 }
 
 type LeagueSeasonCacheEntry = { season: number; fetchedAt: number };
@@ -541,54 +589,41 @@ async function fetchMatchesForTehranDateFromLeagues(
   const leagues = getConfiguredFixtureLeagueIds();
   if (leagues.length === 0) return [];
 
-  const seasonMatches: FixtureMatch[] = [];
-  const seen = new Set<number>();
-  let consecutiveUpstreamFailures = 0;
+  const lookup =
+    process.env.FIXTURE_API_SEASON_LOOKUP?.trim().toLowerCase() === "true" ||
+    process.env.FIXTURE_API_SEASON_LOOKUP?.trim() === "1";
 
-  for (const leagueId of leagues) {
+  let budgetExhausted = false;
+  const batches = await mapPool(leagues, LEAGUE_FETCH_CONCURRENCY, async (leagueId) => {
+    if (budgetExhausted) return [] as FixtureMatch[];
     try {
-      // Default: heuristic season (Aug+ = calendar year, else previous year).
-      // Set FIXTURE_API_SEASON_LOOKUP=true to query /leagues?current=true per league
-      // when VictoryAPI is healthy (needed for calendar-year leagues like Brazil).
-      const lookup =
-        process.env.FIXTURE_API_SEASON_LOOKUP?.trim().toLowerCase() === "true" ||
-        process.env.FIXTURE_API_SEASON_LOOKUP?.trim() === "1";
+      // Prefer local season rules (Brazil = calendar year). Optional /leagues lookup
+      // remains available via FIXTURE_API_SEASON_LOOKUP without blocking coverage.
       const season = lookup
         ? await resolveSeasonForLeague(leagueId, tehranDateKey)
-        : resolveFixtureSeasonForDate(tehranDateKey);
-
-      const rows = await fetchMatchesByLeagueSeason(leagueId, season, options);
-      consecutiveUpstreamFailures = 0;
-      for (const match of rows) {
-        if (seen.has(match.id)) continue;
-        seen.add(match.id);
-        seasonMatches.push(match);
-      }
+        : resolveSeasonForConfiguredLeague(leagueId, tehranDateKey);
+      return await fetchMatchesByLeagueSeason(leagueId, season, options);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.warn(
         `[Bordin] league+season fetch failed for league=${leagueId}:`,
         message,
       );
-
-      if (message === "fixture_api_daily_budget_exhausted") break;
-
-      const upstreamDown =
-        /something wrong with the server|fetch failed|timeout|ECONN|ENOTFOUND|rate limit/i.test(
-          message,
-        );
-      if (upstreamDown) {
-        consecutiveUpstreamFailures += 1;
-        // One upstream outage is enough — fall through to date merge immediately.
-        if (consecutiveUpstreamFailures >= 1) {
-          console.warn(
-            `[Bordin] VictoryAPI unstable — skipping remaining league fetches for ${tehranDateKey}`,
-          );
-          break;
-        }
-      } else {
-        consecutiveUpstreamFailures = 0;
+      if (message === "fixture_api_daily_budget_exhausted") {
+        budgetExhausted = true;
       }
+      // Keep going through other leagues — one flaky league must not blank the week.
+      return [] as FixtureMatch[];
+    }
+  });
+
+  const seasonMatches: FixtureMatch[] = [];
+  const seen = new Set<number>();
+  for (const rows of batches) {
+    for (const match of rows) {
+      if (seen.has(match.id)) continue;
+      seen.add(match.id);
+      seasonMatches.push(match);
     }
   }
 
@@ -601,11 +636,19 @@ function shouldUseDateFixtureFallback() {
   return true;
 }
 
+function leagueDiscoveryBudgetMs(options?: { noCache?: boolean }, dateHitCount = 0) {
+  // Cold cache needs room to warm ~12 leagues (then later days are cache hits).
+  // When date path already returned fixtures, keep league enrich shorter.
+  if (dateHitCount > 0) return options?.noCache ? 15_000 : 20_000;
+  return options?.noCache ? 40_000 : 35_000;
+}
+
 export async function fetchMatchesForTehranDate(
   tehranDateKey: string,
   options?: { noCache?: boolean; skipLocalization?: boolean },
 ) {
-  // Date path first (1 request) so a VictoryAPI league outage cannot block the day.
+  // Date path: cheap extra coverage (competitions outside the configured league list).
+  // League+season is the source of truth for plan-covered competitions.
   let fromDate: FixtureMatch[] = [];
   if (shouldUseDateFixtureFallback()) {
     try {
@@ -621,8 +664,7 @@ export async function fetchMatchesForTehranDate(
     }
   }
 
-  // League+season enrichment with a hard deadline so queue ticks never hang to 504.
-  const leagueBudgetMs = options?.noCache ? 12_000 : 25_000;
+  const leagueBudgetMs = leagueDiscoveryBudgetMs(options, fromDate.length);
   let fromLeagues: FixtureMatch[] = [];
   try {
     fromLeagues = await Promise.race([

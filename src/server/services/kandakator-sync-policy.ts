@@ -430,13 +430,17 @@ export async function evaluateDateSyncNeed(
   const snapshot = await loadKandakatorSnapshot(dateKey);
 
   if (!snapshot || snapshot.matches.length === 0) {
-    // Avoid discovery thrash when a recent sync already confirmed an empty day.
-    // Keep window short (default 30m) so real fixtures can appear the same day.
+    // Empty days must rediscover quickly — VictoryAPI often lags then fills in.
+    // Keep this shorter than the default freshness window used for populated days.
+    const emptyDiscoveryFreshnessMs = readEnvMs(
+      "KANDAKATOR_EMPTY_DISCOVERY_FRESHNESS_MS",
+      10 * 60 * 1000,
+    );
     const completedDiscovery = await getLatestCompletedJob(dateKey);
     if (completedDiscovery?.lastVerifiedAt) {
       if (
         Date.now() - completedDiscovery.lastVerifiedAt.getTime() <
-        freshnessDefaultMs()
+        emptyDiscoveryFreshnessMs
       ) {
         return { shouldEnqueue: false, reason: "recent_completed_fresh" };
       }

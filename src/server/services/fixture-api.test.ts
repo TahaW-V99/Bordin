@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { readMatchScore } from "./fixture-api";
+import {
+  readMatchScore,
+  resolveFixtureSeasonForDate,
+  resolveSeasonForConfiguredLeague,
+} from "./fixture-api";
 
 describe("readMatchScore", () => {
   it("uses fullTime only when match is FINISHED", () => {
@@ -43,5 +47,21 @@ describe("readMatchScore", () => {
       },
     });
     expect(score).toEqual({ homeScore: 1, awayScore: 0 });
+  });
+});
+
+describe("resolveSeasonForConfiguredLeague", () => {
+  it("uses calendar year for Brazil leagues in July", () => {
+    expect(resolveSeasonForConfiguredLeague(71, "2026-07-22")).toBe(2026);
+    expect(resolveSeasonForConfiguredLeague(72, "2026-07-22")).toBe(2026);
+  });
+
+  it("uses European campaign year for Premier League in July", () => {
+    expect(resolveFixtureSeasonForDate("2026-07-22")).toBe(2025);
+    expect(resolveSeasonForConfiguredLeague(39, "2026-07-22")).toBe(2025);
+  });
+
+  it("uses calendar year for European leagues from August", () => {
+    expect(resolveSeasonForConfiguredLeague(39, "2026-08-01")).toBe(2026);
   });
 });
