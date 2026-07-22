@@ -140,14 +140,26 @@ function mapApiFixture(row: ApiFixture): FixtureMatch {
   const regularAway = row.goals.away ?? row.score.halftime?.away ?? null;
   const fullHome = row.score.fulltime?.home ?? null;
   const fullAway = row.score.fulltime?.away ?? null;
+  const homeId = row.teams?.home?.id ?? 0;
+  const awayId = row.teams?.away?.id ?? 0;
+  const leagueId = row.league?.id ?? 0;
 
   return {
     id: row.fixture.id,
     utcDate: row.fixture.date,
     status: short,
-    homeTeam: { id: row.teams.home.id, name: row.teams.home.name },
-    awayTeam: { id: row.teams.away.id, name: row.teams.away.name },
-    competition: { id: row.league.id, name: row.league.name },
+    homeTeam: {
+      id: homeId,
+      name: row.teams?.home?.name?.trim() || `Team ${homeId}`,
+    },
+    awayTeam: {
+      id: awayId,
+      name: row.teams?.away?.name?.trim() || `Team ${awayId}`,
+    },
+    competition: {
+      id: leagueId,
+      name: row.league?.name?.trim() || `League ${leagueId}`,
+    },
     score: {
       fullTime: isFinished
         ? { home: fullHome ?? regularHome, away: fullAway ?? regularAway }
@@ -478,8 +490,9 @@ export async function fetchMatchesByLeagueSeason(
     return cached.matches;
   }
 
+  // VictoryAPI fixtures docs: leagueId + season (not "league").
   const matches = await fetchFixturesFromApi(
-    { league: String(leagueId), season: String(season) },
+    { leagueId: String(leagueId), season: String(season) },
     options,
   );
   seasonFixtureCache.set(cacheKey, { fetchedAt: Date.now(), matches });

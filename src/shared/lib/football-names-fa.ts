@@ -366,7 +366,8 @@ export function isFullyPersianName(name: string | null | undefined) {
   return /[\u0600-\u06FF]/.test(trimmed) && !/[A-Za-z]/.test(trimmed);
 }
 
-export function translateTeamNameToFa(name: string) {
+export function translateTeamNameToFa(name: string | null | undefined) {
+  if (name == null) return "";
   const trimmed = name.trim();
   if (!trimmed) return name;
   if (isFullyPersianName(trimmed)) return trimmed;
