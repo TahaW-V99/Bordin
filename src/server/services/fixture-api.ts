@@ -54,9 +54,12 @@ export function buildFixtureExternalId(apiId: number) {
 
 export function parseFixtureExternalId(externalId: string | null | undefined) {
   if (!externalId?.trim()) return null;
-  const tail = externalId.split("-").pop();
+  // Only VictoryAPI ids (fixture-<n>) can be refreshed by-id.
+  // Legacy football-data-<n> ids hang/timeout against VictoryAPI and must not be used.
+  if (!externalId.startsWith(FIXTURE_EXTERNAL_ID_PREFIX)) return null;
+  const tail = externalId.slice(FIXTURE_EXTERNAL_ID_PREFIX.length);
   const id = Number(tail);
-  return Number.isFinite(id) ? id : null;
+  return Number.isFinite(id) && id > 0 ? id : null;
 }
 
 function normalizeApiKey(raw: string) {
@@ -80,7 +83,10 @@ export function isFixtureApiConfigured() {
   return Boolean(getApiKey());
 }
 
-function getFetchTimeoutMs(options?: { noCache?: boolean }) {
+function getFetchTimeoutMs(options?: { noCache?: boolean; shortTimeoutMs?: number }) {
+  if (options?.shortTimeoutMs != null && options.shortTimeoutMs > 0) {
+    return Math.max(1000, Math.floor(options.shortTimeoutMs));
+  }
   const fromEnv = process.env.FIXTURE_API_FETCH_TIMEOUT_MS?.trim();
   if (fromEnv) return Math.max(1000, Number(fromEnv) || 45_000);
   return options?.noCache ? 45_000 : 30_000;
@@ -211,7 +217,7 @@ function parseApiJsonBody(raw: unknown): ApiFixturesResponse | null {
 
 async function fetchFixturesFromApi(
   params: Record<string, string>,
-  options?: { noCache?: boolean; skipLocalization?: boolean },
+  options?: { noCache?: boolean; skipLocalization?: boolean; shortTimeoutMs?: number },
 ): Promise<FixtureMatch[]> {
   const apiKey = getApiKey();
   if (!apiKey) {
@@ -342,9 +348,13 @@ export async function fetchMatchesInRange(
 
 export async function fetchMatchById(
   apiMatchId: number,
-  options?: { noCache?: boolean; skipLocalization?: boolean },
+  options?: { noCache?: boolean; skipLocalization?: boolean; shortTimeoutMs?: number },
 ) {
-  const rows = await fetchFixturesFromApi({ id: String(apiMatchId) }, options);
+  const rows = await fetchFixturesFromApi({ id: String(apiMatchId) }, {
+    ...options,
+    // By-id refresh must fail fast — bad/legacy ids otherwise hang the whole tick.
+    shortTimeoutMs: options?.shortTimeoutMs ?? 8_000,
+  });
   return rows[0] ?? null;
 }
 
