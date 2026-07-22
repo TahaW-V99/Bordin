@@ -508,26 +508,50 @@ async function fetchMatchesForTehranDateFromLeagues(
 
   const seasonMatches: FixtureMatch[] = [];
   const seen = new Set<number>();
+  let consecutiveUpstreamFailures = 0;
 
   for (const leagueId of leagues) {
     try {
-      const season = await resolveSeasonForLeague(leagueId, tehranDateKey);
+      // Prefer heuristic season first to avoid an extra /leagues call per id
+      // when the upstream is already unstable. API current-season is used only
+      // when FIXTURE_API_SEASON_LOOKUP=true.
+      const season =
+        process.env.FIXTURE_API_SEASON_LOOKUP?.trim().toLowerCase() === "true" ||
+        process.env.FIXTURE_API_SEASON_LOOKUP?.trim() === "1"
+          ? await resolveSeasonForLeague(leagueId, tehranDateKey)
+          : resolveFixtureSeasonForDate(tehranDateKey);
+
       const rows = await fetchMatchesByLeagueSeason(leagueId, season, options);
+      consecutiveUpstreamFailures = 0;
       for (const match of rows) {
         if (seen.has(match.id)) continue;
         seen.add(match.id);
         seasonMatches.push(match);
       }
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       console.warn(
         `[Bordin] league+season fetch failed for league=${leagueId}:`,
-        error instanceof Error ? error.message : error,
+        message,
       );
-      if (
-        error instanceof Error &&
-        error.message === "fixture_api_daily_budget_exhausted"
-      ) {
-        break;
+
+      if (message === "fixture_api_daily_budget_exhausted") break;
+
+      const upstreamDown =
+        /something wrong with the server|fetch failed|timeout|ECONN|ENOTFOUND|rate limit/i.test(
+          message,
+        );
+      if (upstreamDown) {
+        consecutiveUpstreamFailures += 1;
+        // Don't burn the whole day quota/timeouts — fall through to date merge.
+        if (consecutiveUpstreamFailures >= 2) {
+          console.warn(
+            `[Bordin] VictoryAPI unstable — skipping remaining league fetches for ${tehranDateKey}`,
+          );
+          break;
+        }
+      } else {
+        consecutiveUpstreamFailures = 0;
       }
     }
   }
