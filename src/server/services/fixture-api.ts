@@ -388,7 +388,9 @@ export function resolveFixtureSeasonForDate(tehranDateKey: string): number {
   if (!Number.isFinite(year) || !Number.isFinite(month)) {
     return new Date().getFullYear();
   }
-  return month >= 7 ? year : year - 1;
+  // API-Football / VictoryAPI season = start year of the campaign.
+  // European leagues: Aug–May. Until July inclusive, use previous calendar year.
+  return month >= 8 ? year : year - 1;
 }
 
 type LeagueSeasonCacheEntry = { season: number; fetchedAt: number };
