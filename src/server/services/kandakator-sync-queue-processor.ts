@@ -66,7 +66,12 @@ export async function verifyPersistedKandakatorWrite(dateKey: string, expectedCo
 }
 
 async function fetchMatchesDirect(dateKey: string) {
-  const matches = await fetchMatchesForTehranDate(dateKey, { noCache: true });
+  // Skip VictoryAPI name lookups on the hot sync path — they hang when the
+  // upstream is unstable and are not required for scores/settlement.
+  const matches = await fetchMatchesForTehranDate(dateKey, {
+    noCache: true,
+    skipLocalization: true,
+  });
   return {
     fetchedCount: matches.length,
     matches,

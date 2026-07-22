@@ -254,17 +254,40 @@ async function fetchFixturesFromApi(
         throw new Error(message);
       }
 
-      if (apiError) throw new Error(apiError);
+      if (apiError) {
+        // Permanent API errors must not be retried (burns timeout budget).
+        if (/something wrong with the server|Parameter |should enter/i.test(apiError)) {
+          throw new Error(apiError);
+        }
+        throw new Error(apiError);
+      }
 
       const mapped = normalizeApiFixtures(json?.response).map(mapApiFixture);
       if (options?.skipLocalization) return mapped;
-      const { localizeFixtureMatches } = await import("@/server/services/fixture-persian-names");
-      return localizeFixtureMatches(mapped);
+      try {
+        const { localizeFixtureMatches } = await import("@/server/services/fixture-persian-names");
+        return await localizeFixtureMatches(mapped);
+      } catch (localizeError) {
+        console.warn(
+          "[Bordin] fixture localization skipped:",
+          localizeError instanceof Error ? localizeError.message : localizeError,
+        );
+        return mapped;
+      }
     } catch (error) {
       if (error instanceof Error && /fetch failed/i.test(error.message)) {
         throw new Error(
           "اتصال به سرویس مسابقات برقرار نشد. کلید API یا دسترسی اینترنت سرور را بررسی کنید.",
         );
+      }
+      // Do not retry permanent VictoryAPI contract/server errors.
+      if (
+        error instanceof Error &&
+        /something wrong with the server|Parameter |should enter|fixture_api_daily_budget/i.test(
+          error.message,
+        )
+      ) {
+        throw error;
       }
       const isLast = attempt >= 2;
       if (isLast) throw error;
