@@ -11,6 +11,10 @@ import {
 } from "@/server/services/kandakator-sync-queue-service";
 import {
   isDirectFixtureApiSyncAllowed,
+  isFixtureApiCircuitOpen,
+  getFixtureApiCircuitOpenRemainingMs,
+  recordFixtureApiFailure,
+  recordFixtureApiSuccess,
   syncDailyKandakatorFromFootballMatches,
 } from "@/server/services/kandakator-sync-service";
 import {
@@ -88,6 +92,17 @@ async function runFetchJob(dateKey: string, jobId: string) {
 export async function processOneKandakatorSyncJob() {
   if (await shouldUseMemoryDb()) return null;
 
+  if (isFixtureApiCircuitOpen()) {
+    console.warn(
+      "[Bordin:sync-queue]",
+      JSON.stringify({
+        event: "circuit_open_skip",
+        remainingMs: getFixtureApiCircuitOpenRemainingMs(),
+      }),
+    );
+    return null;
+  }
+
   const job = await claimNextKandakatorSyncJob(PROCESSOR_ID);
   if (!job) return null;
 
@@ -96,6 +111,7 @@ export async function processOneKandakatorSyncJob() {
   try {
     const runResult = await runFetchJob(job.dateKey, job.id);
     const fetchSource = "direct";
+    recordFixtureApiSuccess();
 
     await markKandakatorSyncJobFetched(job.id, {
       dateKey: job.dateKey,
@@ -106,35 +122,25 @@ export async function processOneKandakatorSyncJob() {
     const existingCount = await countPublishedMatchesForDate(job.dateKey);
     let persistedCount = existingCount;
     let kandakatorId: string | null = null;
+    let preservedExisting = false;
 
-    if (
-      isEmptyApiPayload(runResult.matches.length) ||
-      isSuspiciousPartialFetch(runResult.fetchedCount, existingCount)
-    ) {
+    if (isEmptyApiPayload(runResult.matches.length)) {
       if (existingCount > 0) {
+        preservedExisting = true;
         console.warn(
-          `[Bordin:sync-queue] unsafe fetch for ${job.dateKey} — preserving ${existingCount} existing matches`,
-          JSON.stringify({ fetchedCount: runResult.fetchedCount }),
+          `[Bordin:sync-queue] empty fetch for ${job.dateKey} — preserving ${existingCount} existing matches`,
         );
-      } else if (runResult.matches.length > 0) {
-        const synced = await syncDailyKandakatorFromFootballMatches(
-          job.dateKey,
-          runResult.matches as FixtureMatch[],
-          {
-            publish: true,
-            source: `queue:${fetchSource}-write`,
-          },
-        );
-        persistedCount = synced.matchCount;
-        kandakatorId = synced.kandakatorId;
       } else {
-        // Real empty day (or temporary API blank): complete once and let freshness
-        // throttle rediscovery. Failing here burned the daily API budget every minute.
         console.warn(
           `[Bordin:sync-queue] empty API response for ${job.dateKey} with no existing matches`,
         );
       }
     } else {
+      if (isSuspiciousPartialFetch(runResult.fetchedCount, existingCount)) {
+        console.warn(
+          `[Bordin:sync-queue] partial fetch for ${job.dateKey} — merging ${runResult.fetchedCount}/${existingCount} without prune`,
+        );
+      }
       const synced = await syncDailyKandakatorFromFootballMatches(
         job.dateKey,
         runResult.matches as FixtureMatch[],
@@ -143,7 +149,8 @@ export async function processOneKandakatorSyncJob() {
           source: `queue:${fetchSource}-write`,
         },
       );
-      persistedCount = synced.matchCount;
+      const afterCount = await countPublishedMatchesForDate(job.dateKey);
+      persistedCount = Math.max(synced.matchCount, afterCount, existingCount);
       kandakatorId = synced.kandakatorId;
     }
 
@@ -160,7 +167,7 @@ export async function processOneKandakatorSyncJob() {
       dateKey: job.dateKey,
       matchCount: persistedCount,
       kandakatorId,
-      preservedExisting: runResult.matches.length === 0 && existingCount > 0,
+      preservedExisting,
     });
 
     const verified = await verifyPersistedKandakatorWrite(job.dateKey, persistedCount);
@@ -184,7 +191,7 @@ export async function processOneKandakatorSyncJob() {
         jobId: job.id,
         fetchedCount: runResult.fetchedCount,
         verified: true,
-        preservedExisting: runResult.matches.length === 0 && existingCount > 0,
+        preservedExisting,
       },
     });
 
@@ -199,6 +206,7 @@ export async function processOneKandakatorSyncJob() {
     return { jobId: job.id, dateKey: job.dateKey, status: "success" as const };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    recordFixtureApiFailure(error);
     console.error("[Bordin:sync-queue]", JSON.stringify({
       event: "job_failed",
       jobId: job.id,

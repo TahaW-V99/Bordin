@@ -52,20 +52,27 @@ export function isFixtureApiCircuitOpen() {
   return Date.now() < fixtureApiCircuit.openUntil;
 }
 
-function recordFixtureApiSuccess() {
+export function recordFixtureApiSuccess() {
   fixtureApiCircuit.consecutiveFailures = 0;
   fixtureApiCircuit.openUntil = 0;
 }
 
-function recordFixtureApiFailure(error: unknown) {
+export function recordFixtureApiFailure(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message === "fixture_api_daily_budget_exhausted") return;
+
   fixtureApiCircuit.consecutiveFailures += 1;
   if (fixtureApiCircuit.consecutiveFailures < API_CIRCUIT_FAILURE_THRESHOLD) return;
 
   fixtureApiCircuit.openUntil = Date.now() + API_CIRCUIT_COOLDOWN_MS;
-  const reason = error instanceof Error ? error.message : String(error);
   console.warn(
-    `[Bordin] Fixture API unreachable (${reason}) — runtime kandakator sync paused for ${Math.round(API_CIRCUIT_COOLDOWN_MS / 60_000)} minutes. Push from your PC: npm run push:kandakator:staging`,
+    `[Bordin] Fixture API unreachable (${message}) — runtime kandakator sync paused for ${Math.round(API_CIRCUIT_COOLDOWN_MS / 60_000)} minutes.`,
   );
+}
+
+export function getFixtureApiCircuitOpenRemainingMs() {
+  if (!isFixtureApiCircuitOpen()) return 0;
+  return Math.max(0, fixtureApiCircuit.openUntil - Date.now());
 }
 
 export function isRuntimeKandakatorSyncEnabled() {
@@ -294,11 +301,15 @@ export async function syncDailyKandakatorFromFootballMatches(
     !canDeleteKandakatorData(options) &&
     isSuspiciousPartialFetch(sorted.length, existingCountBeforeSync)
   ) {
-    return preserveExistingKandakatorDay(
+    logKandakatorSyncPreserved({
       dateKey,
-      "partial_api_response",
+      reason: "partial_api_response",
+      existingCount: existingCountBeforeSync,
+      fetchedCount: sorted.length,
       source,
-      sorted.length,
+    });
+    console.warn(
+      `[Bordin:sync] partial fetch for ${dateKey} — merging ${sorted.length}/${existingCountBeforeSync} without prune`,
     );
   }
 

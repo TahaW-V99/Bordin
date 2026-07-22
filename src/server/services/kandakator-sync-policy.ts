@@ -5,6 +5,8 @@ import { shouldUseMemoryDb } from "@/server/db";
 import { kandakatorDateFromKey } from "@/shared/lib/dates";
 import { isMatchResultKnown } from "@/shared/lib/match-result";
 import { tehranDateKey } from "@/server/memory/kandakator-seed";
+import { countStaleMatchesForDate } from "@/server/services/kandakator-reconciliation-service";
+import { getTehranWeekDays } from "@/server/services/kandakator-service";
 
 type KandakatorSnapshot = {
   id: string;
@@ -335,6 +337,34 @@ async function hasPartialScoresForDate(dateKey: string) {
   return count > 0;
 }
 
+function rediscoveryIntervalMsForDate(dateKey: string) {
+  const todayKey = tehranDateKey(new Date());
+  const today = kandakatorDateFromKey(todayKey);
+  const yesterdayKey = tehranDateKey(addDays(today, -1));
+  const tomorrowKey = tehranDateKey(addDays(today, 1));
+
+  if ([yesterdayKey, todayKey, tomorrowKey].includes(dateKey)) {
+    return readEnvMs("KANDAKATOR_NEAR_DATE_REDISCOVERY_MS", 60 * 60 * 1000);
+  }
+
+  const weekDates = new Set(getTehranWeekDays().map((day) => day.date));
+  if (weekDates.has(dateKey)) {
+    return readEnvMs("KANDAKATOR_WEEK_REDISCOVERY_MS", 6 * 60 * 60 * 1000);
+  }
+
+  return null;
+}
+
+async function needsPeriodicRediscovery(dateKey: string) {
+  const intervalMs = rediscoveryIntervalMsForDate(dateKey);
+  if (intervalMs == null) return false;
+
+  const completedJob = await getLatestCompletedJob(dateKey);
+  if (!completedJob?.lastVerifiedAt) return true;
+
+  return Date.now() - completedJob.lastVerifiedAt.getTime() >= intervalMs;
+}
+
 /**
  * Decision table (priority: force → backpressure → open job → retry → dead letter →
  * discovery → DB issues → completed freshness → lifecycle urgency):
@@ -415,7 +445,27 @@ export async function evaluateDateSyncNeed(
     return { shouldEnqueue: true, reason: "partial_scores" };
   }
 
+  const staleCount = await countStaleMatchesForDate(dateKey);
+  if (staleCount > 0) {
+    return { shouldEnqueue: true, reason: "stale_scores" };
+  }
+
   const urgency = classifySyncUrgency(dateKey, snapshot);
+
+  if (urgency === "critical") {
+    return { shouldEnqueue: true, reason: criticalLifecycleReason(snapshot) };
+  }
+
+  if (await needsPeriodicRediscovery(dateKey)) {
+    const todayKey = tehranDateKey(new Date());
+    const today = kandakatorDateFromKey(todayKey);
+    const yesterdayKey = tehranDateKey(addDays(today, -1));
+    const tomorrowKey = tehranDateKey(addDays(today, 1));
+    const reason = [yesterdayKey, todayKey, tomorrowKey].includes(dateKey)
+      ? "near_date_rediscovery"
+      : "week_rediscovery";
+    return { shouldEnqueue: true, reason };
+  }
 
   if (urgency === "none") {
     const todayKey = tehranDateKey(new Date());
@@ -436,10 +486,6 @@ export async function evaluateDateSyncNeed(
     if (withinFreshness) {
       return { shouldEnqueue: false, reason: "recent_completed_fresh" };
     }
-  }
-
-  if (urgency === "critical") {
-    return { shouldEnqueue: true, reason: criticalLifecycleReason(snapshot) };
   }
 
   if (urgency === "medium") {

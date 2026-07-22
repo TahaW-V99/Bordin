@@ -313,21 +313,247 @@ export async function fetchMatchById(
   return rows[0] ?? null;
 }
 
-export async function fetchMatchesForTehranDate(
+const DEFAULT_COVERED_LEAGUE_IDS = [
+  2, 3, 39, 61, 71, 72, 78, 88, 94, 135, 140, 290,
+];
+
+type SeasonCacheEntry = { fetchedAt: number; matches: FixtureMatch[] };
+const seasonFixtureCache = new Map<string, SeasonCacheEntry>();
+
+function seasonCacheTtlMs() {
+  const raw = process.env.FIXTURE_API_SEASON_CACHE_TTL_MS?.trim();
+  if (!raw) return 6 * 60 * 60 * 1000;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed >= 60_000
+    ? Math.floor(parsed)
+    : 6 * 60 * 60 * 1000;
+}
+
+export function getConfiguredFixtureLeagueIds(): number[] {
+  const raw = process.env.FIXTURE_API_LEAGUE_IDS?.trim();
+  if (raw) {
+    const parsed = raw
+      .split(/[,\s]+/)
+      .map((part) => Number(part.trim()))
+      .filter((id) => Number.isFinite(id) && id > 0);
+    if (parsed.length > 0) return [...new Set(parsed)];
+  }
+  return DEFAULT_COVERED_LEAGUE_IDS;
+}
+
+export function resolveFixtureSeasonForDate(tehranDateKey: string): number {
+  const forced = process.env.FIXTURE_API_SEASON?.trim();
+  if (forced) {
+    const year = Number(forced);
+    if (Number.isFinite(year) && year >= 2000) return Math.floor(year);
+  }
+  const [yearStr, monthStr] = tehranDateKey.split("-");
+  const year = Number(yearStr);
+  const month = Number(monthStr);
+  if (!Number.isFinite(year) || !Number.isFinite(month)) {
+    return new Date().getFullYear();
+  }
+  return month >= 7 ? year : year - 1;
+}
+
+type LeagueSeasonCacheEntry = { season: number; fetchedAt: number };
+const leagueCurrentSeasonCache = new Map<number, LeagueSeasonCacheEntry>();
+
+function leagueSeasonCacheTtlMs() {
+  const raw = process.env.FIXTURE_API_LEAGUE_SEASON_CACHE_TTL_MS?.trim();
+  if (!raw) return 24 * 60 * 60 * 1000;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed >= 60_000
+    ? Math.floor(parsed)
+    : 24 * 60 * 60 * 1000;
+}
+
+type ApiLeagueSeasonRow = {
+  seasons?: Array<{ year?: number; current?: boolean }>;
+};
+
+export async function resolveSeasonForLeague(
+  leagueId: number,
   tehranDateKey: string,
-  options?: { noCache?: boolean; skipLocalization?: boolean },
-) {
+): Promise<number> {
+  const forced = process.env.FIXTURE_API_SEASON?.trim();
+  if (forced) {
+    const year = Number(forced);
+    if (Number.isFinite(year) && year >= 2000) return Math.floor(year);
+  }
+
+  const cached = leagueCurrentSeasonCache.get(leagueId);
+  if (cached && Date.now() - cached.fetchedAt < leagueSeasonCacheTtlMs()) {
+    return cached.season;
+  }
+
+  try {
+    if (!tryConsumeFixtureApiBudget()) {
+      return resolveFixtureSeasonForDate(tehranDateKey);
+    }
+
+    const apiKey = getApiKey();
+    if (!apiKey) return resolveFixtureSeasonForDate(tehranDateKey);
+
+    const url = new URL(`${getApiBase()}/leagues`);
+    url.searchParams.set("id", String(leagueId));
+    url.searchParams.set("current", "true");
+
+    const res = await fetch(url.toString(), {
+      headers: { "x-vapi-key": apiKey },
+      signal: AbortSignal.timeout(getFetchTimeoutMs()),
+      next: { revalidate: 3600 },
+    });
+    const raw = await res.json().catch(() => null);
+    const json = parseApiJsonBody(raw) as {
+      response?: ApiLeagueSeasonRow[] | Record<string, unknown>;
+    } | null;
+
+    if (!res.ok) return resolveFixtureSeasonForDate(tehranDateKey);
+
+    const rows = Array.isArray(json?.response)
+      ? json.response
+      : json?.response && typeof json.response === "object"
+        ? (Object.values(json.response) as ApiLeagueSeasonRow[])
+        : [];
+
+    const seasons = rows[0]?.seasons ?? [];
+    const current =
+      seasons.find((s) => s.current === true)?.year ??
+      seasons[seasons.length - 1]?.year ??
+      null;
+
+    if (typeof current === "number" && Number.isFinite(current) && current >= 2000) {
+      leagueCurrentSeasonCache.set(leagueId, {
+        season: Math.floor(current),
+        fetchedAt: Date.now(),
+      });
+      return Math.floor(current);
+    }
+  } catch (error) {
+    console.warn(
+      `[Bordin] current season lookup failed for league=${leagueId}:`,
+      error instanceof Error ? error.message : error,
+    );
+  }
+
+  return resolveFixtureSeasonForDate(tehranDateKey);
+}
+
+function filterMatchesToTehranDay(matches: FixtureMatch[], tehranDateKey: string) {
   const dayStart = fromZonedTime(`${tehranDateKey}T00:00:00`, TEHRAN_TZ);
   const dayEnd = fromZonedTime(`${tehranDateKey}T23:59:59`, TEHRAN_TZ);
-
-  const matches = await fetchMatchesByDate(tehranDateKey, options);
-
   return matches
     .filter((match) => {
       const kickoff = new Date(match.utcDate).getTime();
       return kickoff >= dayStart.getTime() && kickoff <= dayEnd.getTime();
     })
     .sort((a, b) => new Date(a.utcDate).getTime() - new Date(b.utcDate).getTime());
+}
+
+function mergeFixtureMatches(...groups: FixtureMatch[][]) {
+  const seen = new Set<number>();
+  const merged: FixtureMatch[] = [];
+  for (const group of groups) {
+    for (const match of group) {
+      if (seen.has(match.id)) continue;
+      seen.add(match.id);
+      merged.push(match);
+    }
+  }
+  return merged.sort(
+    (a, b) => new Date(a.utcDate).getTime() - new Date(b.utcDate).getTime(),
+  );
+}
+
+export async function fetchMatchesByLeagueSeason(
+  leagueId: number,
+  season: number,
+  options?: { noCache?: boolean; skipLocalization?: boolean; forceRefresh?: boolean },
+) {
+  const cacheKey = `${leagueId}:${season}:loc=${options?.skipLocalization ? "0" : "1"}`;
+  const ttl = seasonCacheTtlMs();
+  const cached = seasonFixtureCache.get(cacheKey);
+  if (cached && !options?.forceRefresh && Date.now() - cached.fetchedAt < ttl) {
+    return cached.matches;
+  }
+
+  const matches = await fetchFixturesFromApi(
+    { league: String(leagueId), season: String(season) },
+    options,
+  );
+  seasonFixtureCache.set(cacheKey, { fetchedAt: Date.now(), matches });
+  return matches;
+}
+
+async function fetchMatchesForTehranDateFromLeagues(
+  tehranDateKey: string,
+  options?: { noCache?: boolean; skipLocalization?: boolean },
+) {
+  const leagues = getConfiguredFixtureLeagueIds();
+  if (leagues.length === 0) return [];
+
+  const seasonMatches: FixtureMatch[] = [];
+  const seen = new Set<number>();
+
+  for (const leagueId of leagues) {
+    try {
+      const season = await resolveSeasonForLeague(leagueId, tehranDateKey);
+      const rows = await fetchMatchesByLeagueSeason(leagueId, season, options);
+      for (const match of rows) {
+        if (seen.has(match.id)) continue;
+        seen.add(match.id);
+        seasonMatches.push(match);
+      }
+    } catch (error) {
+      console.warn(
+        `[Bordin] league+season fetch failed for league=${leagueId}:`,
+        error instanceof Error ? error.message : error,
+      );
+      if (
+        error instanceof Error &&
+        error.message === "fixture_api_daily_budget_exhausted"
+      ) {
+        break;
+      }
+    }
+  }
+
+  return filterMatchesToTehranDay(seasonMatches, tehranDateKey);
+}
+
+function shouldUseDateFixtureFallback() {
+  const raw = process.env.FIXTURE_API_DATE_FALLBACK?.trim().toLowerCase();
+  if (raw === "0" || raw === "false" || raw === "off") return false;
+  return true;
+}
+
+export async function fetchMatchesForTehranDate(
+  tehranDateKey: string,
+  options?: { noCache?: boolean; skipLocalization?: boolean },
+) {
+  const fromLeagues = await fetchMatchesForTehranDateFromLeagues(tehranDateKey, options);
+
+  if (!shouldUseDateFixtureFallback()) {
+    return fromLeagues;
+  }
+
+  try {
+    const fromDate = filterMatchesToTehranDay(
+      await fetchMatchesByDate(tehranDateKey, options),
+      tehranDateKey,
+    );
+    return mergeFixtureMatches(fromLeagues, fromDate);
+  } catch (error) {
+    if (fromLeagues.length > 0) {
+      console.warn(
+        `[Bordin] date fixture fallback failed for ${tehranDateKey}:`,
+        error instanceof Error ? error.message : error,
+      );
+      return fromLeagues;
+    }
+    throw error;
+  }
 }
 
 export function mapFixtureStatus(

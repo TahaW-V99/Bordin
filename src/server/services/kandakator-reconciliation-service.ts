@@ -3,7 +3,6 @@ import { prisma } from "@/shared/lib/prisma";
 import { shouldUseMemoryDb } from "@/server/db";
 import { tehranDateKey } from "@/server/memory/kandakator-seed";
 import { kandakatorDateFromKey } from "@/shared/lib/dates";
-import { isMatchResultKnown } from "@/shared/lib/match-result";
 import {
   detectMatchConsistencyIssues,
   derivePredictionCategory,
@@ -21,6 +20,20 @@ import {
   hasPublishedKandakatorForDate,
 } from "@/server/services/kandakator-display-ingest";
 import { settleAllFinishedMatches } from "@/server/services/settlement-service";
+import {
+  fetchMatchById,
+  isFixtureApiConfigured,
+  mapFixtureStatus,
+  parseFixtureExternalId,
+  readMatchScore,
+} from "@/server/services/fixture-api";
+import {
+  isFixtureApiCircuitOpen,
+  recordFixtureApiFailure,
+  recordFixtureApiSuccess,
+  syncDailyKandakatorFromFootballMatches,
+} from "@/server/services/kandakator-sync-service";
+import { isMatchResultKnown } from "@/shared/lib/match-result";
 
 export type ReconciliationResult = {
   staleCount: number;
@@ -29,10 +42,55 @@ export type ReconciliationResult = {
   partialScoreCount: number;
   datesTriggered: string[];
   settledCount: number;
+  idRefreshCount: number;
   durationMs: number;
   status: "success" | "partial" | "failed";
   errorMessage?: string;
 };
+
+function staleIdRefreshMax() {
+  const raw = process.env.KANDAKATOR_STALE_ID_REFRESH_MAX?.trim();
+  if (!raw) return 8;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.min(30, Math.floor(parsed)) : 8;
+}
+
+type StaleIdRetryState = { attempts: number; nextRetryAt: number };
+const staleIdRetryByMatchId = new Map<string, StaleIdRetryState>();
+const STALE_ID_BACKOFF_BASE_MS = 5 * 60 * 1000;
+const STALE_ID_BACKOFF_MAX_MS = 6 * 60 * 60 * 1000;
+
+function staleIdBackoffMs(attempts: number) {
+  return Math.min(STALE_ID_BACKOFF_MAX_MS, STALE_ID_BACKOFF_BASE_MS * 2 ** Math.max(0, attempts - 1));
+}
+
+function isStaleIdRefreshInCooldown(matchId: string) {
+  const state = staleIdRetryByMatchId.get(matchId);
+  return state != null && Date.now() < state.nextRetryAt;
+}
+
+function recordStaleIdRefreshFailure(matchId: string) {
+  const attempts = (staleIdRetryByMatchId.get(matchId)?.attempts ?? 0) + 1;
+  staleIdRetryByMatchId.set(matchId, {
+    attempts,
+    nextRetryAt: Date.now() + staleIdBackoffMs(attempts),
+  });
+}
+
+function resetStaleIdRefreshRetry(matchId: string) {
+  staleIdRetryByMatchId.delete(matchId);
+}
+
+function isByIdRefreshResolved(apiMatch: NonNullable<Awaited<ReturnType<typeof fetchMatchById>>>) {
+  const status = mapFixtureStatus(apiMatch.status);
+  if (status === "CANCELLED" || status === "POSTPONED") return true;
+  const scores = readMatchScore(apiMatch);
+  return isMatchResultKnown({
+    status,
+    homeScore: scores.homeScore,
+    awayScore: scores.awayScore,
+  });
+}
 
 async function findStaleMatches() {
   const now = new Date();
@@ -47,12 +105,66 @@ async function findStaleMatches() {
     },
     select: {
       id: true,
+      externalId: true,
       status: true,
       homeScore: true,
       awayScore: true,
       kickoffAt: true,
     },
   });
+}
+
+async function refreshStaleMatchesByFixtureId(
+  staleMatches: Array<{ id: string; externalId: string | null; kickoffAt: Date }>,
+): Promise<number> {
+  if (!isFixtureApiConfigured() || isFixtureApiCircuitOpen()) return 0;
+
+  const maxRefresh = staleIdRefreshMax();
+  if (maxRefresh <= 0) return 0;
+
+  const candidates = [...staleMatches]
+    .filter((m) => parseFixtureExternalId(m.externalId) != null)
+    .filter((m) => !isStaleIdRefreshInCooldown(m.id))
+    .sort((a, b) => a.kickoffAt.getTime() - b.kickoffAt.getTime())
+    .slice(0, maxRefresh);
+
+  let refreshed = 0;
+  for (const match of candidates) {
+    if (isFixtureApiCircuitOpen()) break;
+
+    const apiId = parseFixtureExternalId(match.externalId);
+    if (apiId == null) continue;
+
+    try {
+      const apiMatch = await fetchMatchById(apiId, { noCache: true });
+      if (!apiMatch) {
+        recordStaleIdRefreshFailure(match.id);
+        continue;
+      }
+
+      recordFixtureApiSuccess();
+      await syncDailyKandakatorFromFootballMatches(
+        tehranDateKey(match.kickoffAt),
+        [apiMatch],
+        { publish: true, source: "reconciliation:by-id" },
+      );
+
+      if (isByIdRefreshResolved(apiMatch)) {
+        resetStaleIdRefreshRetry(match.id);
+        refreshed += 1;
+      } else {
+        recordStaleIdRefreshFailure(match.id);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message === "fixture_api_daily_budget_exhausted") break;
+      recordStaleIdRefreshFailure(match.id);
+      recordFixtureApiFailure(error);
+      if (isFixtureApiCircuitOpen()) break;
+    }
+  }
+
+  return refreshed;
 }
 
 async function findUnsettledPredictionsWithKnownResults() {
@@ -141,6 +253,7 @@ export async function runKandakatorReconciliation(): Promise<ReconciliationResul
       partialScoreCount: 0,
       datesTriggered: [],
       settledCount: settle.settled,
+      idRefreshCount: 0,
       durationMs: Date.now() - startedAt,
       status: "success",
     };
@@ -160,6 +273,8 @@ export async function runKandakatorReconciliation(): Promise<ReconciliationResul
         orphanCount += 1;
       }
     }
+
+    const idRefreshCount = await refreshStaleMatchesByFixtureId(staleMatches);
 
     const dateKeys = new Set<string>();
     for (const match of staleMatches) {
@@ -216,7 +331,7 @@ export async function runKandakatorReconciliation(): Promise<ReconciliationResul
     const hasProblems =
       remainingStale.length > 0 || remainingUnsettled.length > 0 || remainingPartial.length > 0;
     const status: ReconciliationResult["status"] =
-      remainingStale.length > 0 && datesTriggered.length === 0
+      remainingStale.length > 0 && datesTriggered.length === 0 && idRefreshCount === 0
         ? "failed"
         : hasProblems
           ? "partial"
@@ -229,6 +344,7 @@ export async function runKandakatorReconciliation(): Promise<ReconciliationResul
       partialScoreCount: remainingPartial.length,
       datesTriggered,
       settledCount: settleResult.settled,
+      idRefreshCount,
       durationMs,
       status,
     };
@@ -247,6 +363,7 @@ export async function runKandakatorReconciliation(): Promise<ReconciliationResul
         datesTriggered,
         unsettledCount: remainingUnsettled.length,
         partialScoreCount: remainingPartial.length,
+        idRefreshCount,
       },
     });
 
@@ -265,6 +382,7 @@ export async function runKandakatorReconciliation(): Promise<ReconciliationResul
       partialScoreCount: 0,
       datesTriggered: [],
       settledCount: 0,
+      idRefreshCount: 0,
       durationMs,
       status: "failed",
       errorMessage,
