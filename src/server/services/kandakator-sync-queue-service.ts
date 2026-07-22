@@ -87,22 +87,29 @@ export async function enqueueKandakatorSyncJob(input: EnqueueSyncJobInput) {
   const existing = await findActiveSyncJob(input.dateKey);
 
   if (existing) {
-    if (existing.status === SyncJobStatus.FAILED || existing.status === SyncJobStatus.PROCESSING) {
+    if (
+      existing.status === SyncJobStatus.FAILED ||
+      existing.status === SyncJobStatus.PROCESSING ||
+      existing.attemptCount >= existing.maxAttempts
+    ) {
       console.info("[Bordin:sync-queue]", JSON.stringify({
         event: "requeue",
         dateKey: input.dateKey,
         source: input.source,
         existingJobId: existing.id,
         previousStatus: existing.status,
+        previousAttemptCount: existing.attemptCount,
       }));
       return prisma.kandakatorSyncJob.update({
         where: { id: existing.id },
         data: {
           status: SyncJobStatus.PENDING,
           activeDateKey: input.dateKey,
+          attemptCount: 0,
           nextAttemptAt: new Date(),
           lockedAt: null,
           lockedBy: null,
+          lastError: null,
           source: input.source,
           requestedBy: input.requestedBy,
           payload: input.payload,
@@ -205,6 +212,23 @@ export async function enqueueKandakatorSyncDatesIfNeeded(
 }
 
 async function releaseStaleLocks() {
+  // PENDING/FAILED rows that already burned all attempts can never be claimed
+  // (claim requires attemptCount < max). Sweep them to DEAD_LETTER so the
+  // unique activeDateKey slot frees and a fresh job can be enqueued.
+  await prisma.kandakatorSyncJob.updateMany({
+    where: {
+      status: { in: [SyncJobStatus.PENDING, SyncJobStatus.FAILED] },
+      attemptCount: { gte: DEFAULT_MAX_ATTEMPTS },
+    },
+    data: {
+      status: SyncJobStatus.DEAD_LETTER,
+      activeDateKey: null,
+      lockedAt: null,
+      lockedBy: null,
+      lastError: "exhausted_attempts_swept",
+    },
+  });
+
   const cutoff = addMinutes(new Date(), -STALE_LOCK_MINUTES);
   await prisma.kandakatorSyncJob.updateMany({
     where: {
