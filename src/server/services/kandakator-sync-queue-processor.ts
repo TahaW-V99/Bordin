@@ -28,7 +28,11 @@ import {
   isSuspiciousPartialFetch,
 } from "@/server/services/kandakator-sync-safety";
 import { countPublishedMatchesForDate } from "@/server/services/kandakator-display-ingest";
-import { countStaleMatchesForDate } from "@/server/services/kandakator-reconciliation-service";
+import {
+  countStaleMatchesForDate,
+  refreshStaleMatchesForDate,
+} from "@/server/services/kandakator-reconciliation-service";
+import { settleAllFinishedMatches } from "@/server/services/settlement-service";
 
 const PROCESSOR_ID = `kandakator-sync-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
@@ -159,12 +163,28 @@ export async function processOneKandakatorSyncJob() {
       kandakatorId = synced.kandakatorId;
     }
 
-    // Best-effort: remaining stale scores retry on next freshness window, not hard-fail.
-    // Hard-fail caused API thrash + dead letters while burning the daily budget.
+    // Day-level fetch can miss FT scores; immediately refresh stale matches by fixture id.
+    let idRefreshCount = 0;
     const staleAfterSync = await countStaleMatchesForDate(job.dateKey);
     if (staleAfterSync > 0) {
+      idRefreshCount = await refreshStaleMatchesForDate(job.dateKey);
+      const staleAfterRefresh = await countStaleMatchesForDate(job.dateKey);
+      if (staleAfterRefresh > 0) {
+        console.warn(
+          `[Bordin:sync-queue] ${job.dateKey} still has ${staleAfterRefresh} stale match(es) after by-id refresh (${idRefreshCount} healed)`,
+        );
+      }
+    }
+
+    // Settle any predictions whose scores are now known (day sync or by-id).
+    let settledCount = 0;
+    try {
+      const settle = await settleAllFinishedMatches();
+      settledCount = settle.settled;
+    } catch (settleError) {
       console.warn(
-        `[Bordin:sync-queue] ${job.dateKey} still has ${staleAfterSync} stale match(es) after sync — will retry later`,
+        `[Bordin:sync-queue] settlement after ${job.dateKey} failed:`,
+        settleError instanceof Error ? settleError.message : settleError,
       );
     }
 
@@ -197,6 +217,8 @@ export async function processOneKandakatorSyncJob() {
         fetchedCount: runResult.fetchedCount,
         verified: true,
         preservedExisting,
+        idRefreshCount,
+        settledCount,
       },
     });
 
@@ -206,6 +228,8 @@ export async function processOneKandakatorSyncJob() {
       dateKey: job.dateKey,
       fetchedCount: runResult.fetchedCount,
       persistedCount,
+      idRefreshCount,
+      settledCount,
       durationMs: Date.now() - startedAt,
     }));
     return { jobId: job.id, dateKey: job.dateKey, status: "success" as const };

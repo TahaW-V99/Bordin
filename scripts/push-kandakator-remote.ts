@@ -1,5 +1,6 @@
 /**
- * Enqueues kandakator week sync jobs on remote app(s).
+ * Triggers kandakator tick on remote app(s): enqueue near dates, process queue,
+ * refresh stale scores, settle predictions.
  * Used by GitHub Actions and: npm run push:kandakator:remote
  */
 
@@ -9,7 +10,7 @@ async function pushWithRetry(url: string, init: RequestInit, attempts = 4) {
     try {
       const res = await fetch(url, {
         ...init,
-        signal: AbortSignal.timeout(60_000),
+        signal: AbortSignal.timeout(90_000),
       });
       return res;
     } catch (error) {
@@ -41,31 +42,34 @@ export async function pushKandakatorWeekRemote() {
     throw new Error("No push target URL configured (BORDIN_PUSH_URLS / BORDIN_STAGING_URL)");
   }
 
-  const { getTehranWeekDays } = await import("@/server/services/kandakator-service");
-
-  const days = getTehranWeekDays();
-  const dateKeys = days.map((day) => day.date);
-
   for (const baseUrl of targets) {
-    console.log(`\n→ Enqueueing to ${baseUrl}`);
+    console.log(`\n→ Ticking ${baseUrl}`);
 
-    const res = await pushWithRetry(`${baseUrl}/api/internal/kandakator/enqueue`, {
+    const res = await pushWithRetry(`${baseUrl}/api/internal/kandakator/tick`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${pushToken}`,
         "X-Bordin-Sync-Source": "github-actions",
       },
-      body: JSON.stringify({ dates: dateKeys, source: "github-actions" }),
+      body: JSON.stringify({ source: "github-actions" }),
     });
     const data = (await res.json().catch(() => ({}))) as {
       error?: string;
-      jobs?: Array<{ id: string; dateKey: string; status: string }>;
+      queueProcessed?: number;
+      settlement?: { settled?: number };
+      reconciliation?: { staleCount?: number; settledCount?: number; idRefreshCount?: number } | null;
     };
     if (!res.ok) {
-      throw new Error(`Queue enqueue failed @ ${baseUrl}: ${data.error ?? res.statusText}`);
+      throw new Error(`Tick failed @ ${baseUrl}: ${data.error ?? res.statusText}`);
     }
-    console.log(`  Queued ${data.jobs?.length ?? 0} sync jobs @ ${baseUrl}`);
+    console.log(
+      `  queue=${data.queueProcessed ?? 0}` +
+        ` settled=${data.settlement?.settled ?? 0}` +
+        ` stale=${data.reconciliation?.staleCount ?? "n/a"}` +
+        ` idRefresh=${data.reconciliation?.idRefreshCount ?? "n/a"}` +
+        ` @ ${baseUrl}`,
+    );
   }
 }
 

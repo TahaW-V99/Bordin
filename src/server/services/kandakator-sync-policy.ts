@@ -411,6 +411,13 @@ export async function evaluateDateSyncNeed(
     return { shouldEnqueue: false, reason: "open_job" };
   }
 
+  // Finished/awaiting scores must never be blocked by dead-letter cooldown or
+  // scheduled-retry delays — results + prediction settlement depend on this.
+  const staleCountEarly = await countStaleMatchesForDate(dateKey);
+  if (staleCountEarly > 0) {
+    return { shouldEnqueue: true, reason: "stale_scores" };
+  }
+
   const retryJob = await hasRetryScheduledJob(dateKey);
   if (retryJob) {
     return { shouldEnqueue: false, reason: "retry_scheduled" };
@@ -443,11 +450,6 @@ export async function evaluateDateSyncNeed(
 
   if (await hasPartialScoresForDate(dateKey)) {
     return { shouldEnqueue: true, reason: "partial_scores" };
-  }
-
-  const staleCount = await countStaleMatchesForDate(dateKey);
-  if (staleCount > 0) {
-    return { shouldEnqueue: true, reason: "stale_scores" };
   }
 
   const urgency = classifySyncUrgency(dateKey, snapshot);

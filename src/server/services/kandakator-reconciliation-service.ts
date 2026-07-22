@@ -114,7 +114,11 @@ async function findStaleMatches() {
   });
 }
 
-async function refreshStaleMatchesByFixtureId(
+/**
+ * Targeted score refresh for stale published matches.
+ * Exported so the sync queue can heal scores immediately after a thin day fetch.
+ */
+export async function refreshStaleMatchesByFixtureId(
   staleMatches: Array<{ id: string; externalId: string | null; kickoffAt: Date }>,
 ): Promise<number> {
   if (!isFixtureApiConfigured() || isFixtureApiCircuitOpen()) return 0;
@@ -136,7 +140,10 @@ async function refreshStaleMatchesByFixtureId(
     if (apiId == null) continue;
 
     try {
-      const apiMatch = await fetchMatchById(apiId, { noCache: true });
+      const apiMatch = await fetchMatchById(apiId, {
+        noCache: true,
+        skipLocalization: true,
+      });
       if (!apiMatch) {
         recordStaleIdRefreshFailure(match.id);
         continue;
@@ -165,6 +172,25 @@ async function refreshStaleMatchesByFixtureId(
   }
 
   return refreshed;
+}
+
+export async function refreshStaleMatchesForDate(dateKey: string): Promise<number> {
+  const dayStart = kandakatorDateFromKey(dateKey);
+  const dayEnd = addDays(dayStart, 1);
+  const now = new Date();
+
+  const stale = await prisma.footballMatch.findMany({
+    where: {
+      kickoffAt: { gte: dayStart, lt: dayEnd, lte: now },
+      status: { notIn: ["CANCELLED", "POSTPONED"] },
+      OR: [{ homeScore: null }, { awayScore: null }],
+      kandakatorMatches: { some: { kandakator: { isPublished: true } } },
+    },
+    select: { id: true, externalId: true, kickoffAt: true },
+    take: 30,
+  });
+
+  return refreshStaleMatchesByFixtureId(stale);
 }
 
 async function findUnsettledPredictionsWithKnownResults() {

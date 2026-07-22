@@ -6,6 +6,7 @@ import { processKandakatorSyncQueue } from "@/server/services/kandakator-sync-qu
 import { runKandakatorReconciliation } from "@/server/services/kandakator-reconciliation-service";
 import { enqueueKandakatorSyncDatesIfNeeded } from "@/server/services/kandakator-sync-queue-service";
 import { getTehranWeekDays } from "@/server/services/kandakator-service";
+import { settleAllFinishedMatches } from "@/server/services/settlement-service";
 import { tehranDateKey } from "@/server/memory/kandakator-seed";
 import { kandakatorDateFromKey } from "@/shared/lib/dates";
 
@@ -67,12 +68,17 @@ export async function POST(request: Request) {
       lastReconcileAt = Date.now();
     }
 
+    // Every tick: settle predictions whose match scores are already in DB.
+    // (Reconciliation also settles, but only every 5 minutes.)
+    const settlement = await settleAllFinishedMatches();
+
     return NextResponse.json({
       success: true,
       source,
       queueProcessed: queueResults.length,
       queueResults,
       reconciliation,
+      settlement,
     });
   } catch (error) {
     return NextResponse.json({ error: getApiErrorMessage(error) }, { status: 400 });

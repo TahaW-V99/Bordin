@@ -1,5 +1,5 @@
-# به‌روزرسانی خودکار کنداکتور: صف همگام‌سازی را روی برنامه enqueue می‌کند
-# (برنامه خودش داده را از VictoryAPI می‌گیرد — سرور لیارا به VictoryAPI دسترسی دارد).
+# به‌روزرسانی خودکار کنداکتور: tick روی برنامه
+# (enqueue نزدیک‌ترین روزها + پردازش صف + refresh نتایج stale + تسویه پیش‌بینی‌ها).
 #
 # تنظیم یک‌باره در GitHub → Settings → Secrets → Actions:
 #   KANDAKATOR_SYNC_PUSH_TOKEN
@@ -9,8 +9,8 @@ name: Kandakator auto-sync
 
 on:
   schedule:
-    # هر ۲۰ دقیقه — بازی‌های جدید + نتایج + تسویه پیش‌بینی‌ها
-    - cron: "*/20 * * * *"
+    # هر ۱۵ دقیقه — نتایج بازی + تسویه پیش‌بینی‌ها
+    - cron: "*/15 * * * *"
   workflow_dispatch:
 
 concurrency:
@@ -34,7 +34,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Enqueue kandakator week sync on app
+      - name: Tick kandakator (sync results + settle predictions)
         env:
           KANDAKATOR_SYNC_PUSH_TOKEN: ${{ secrets.KANDAKATOR_SYNC_PUSH_TOKEN }}
           BORDIN_PUSH_URLS: ${{ secrets.BORDIN_PUSH_URLS || 'https://bordintest.ir,https://bordin.ir' }}
