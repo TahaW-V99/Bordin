@@ -543,8 +543,8 @@ async function fetchMatchesForTehranDateFromLeagues(
         );
       if (upstreamDown) {
         consecutiveUpstreamFailures += 1;
-        // Don't burn the whole day quota/timeouts — fall through to date merge.
-        if (consecutiveUpstreamFailures >= 2) {
+        // One upstream outage is enough — fall through to date merge immediately.
+        if (consecutiveUpstreamFailures >= 1) {
           console.warn(
             `[Bordin] VictoryAPI unstable — skipping remaining league fetches for ${tehranDateKey}`,
           );
@@ -569,28 +569,39 @@ export async function fetchMatchesForTehranDate(
   tehranDateKey: string,
   options?: { noCache?: boolean; skipLocalization?: boolean },
 ) {
-  const fromLeagues = await fetchMatchesForTehranDateFromLeagues(tehranDateKey, options);
-
-  if (!shouldUseDateFixtureFallback()) {
-    return fromLeagues;
-  }
-
-  try {
-    const fromDate = filterMatchesToTehranDay(
-      await fetchMatchesByDate(tehranDateKey, options),
-      tehranDateKey,
-    );
-    return mergeFixtureMatches(fromLeagues, fromDate);
-  } catch (error) {
-    if (fromLeagues.length > 0) {
+  // Date path first (1 request) so a VictoryAPI league outage cannot block the day.
+  // League+season then merges extras (VictoryAPI recommendation for ongoing comps).
+  let fromDate: FixtureMatch[] = [];
+  if (shouldUseDateFixtureFallback()) {
+    try {
+      fromDate = filterMatchesToTehranDay(
+        await fetchMatchesByDate(tehranDateKey, options),
+        tehranDateKey,
+      );
+    } catch (error) {
       console.warn(
-        `[Bordin] date fixture fallback failed for ${tehranDateKey}:`,
+        `[Bordin] date fixture fetch failed for ${tehranDateKey}:`,
         error instanceof Error ? error.message : error,
       );
-      return fromLeagues;
     }
-    throw error;
   }
+
+  let fromLeagues: FixtureMatch[] = [];
+  try {
+    fromLeagues = await fetchMatchesForTehranDateFromLeagues(tehranDateKey, options);
+  } catch (error) {
+    console.warn(
+      `[Bordin] league+season discovery failed for ${tehranDateKey}:`,
+      error instanceof Error ? error.message : error,
+    );
+  }
+
+  const merged = mergeFixtureMatches(fromLeagues, fromDate);
+  if (merged.length === 0 && fromDate.length === 0 && fromLeagues.length === 0) {
+    // Re-throw only when both paths produced nothing and date was required.
+    if (!shouldUseDateFixtureFallback()) return fromLeagues;
+  }
+  return merged;
 }
 
 export function mapFixtureStatus(
