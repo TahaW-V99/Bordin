@@ -9,8 +9,10 @@ import { shouldUseMemoryDb } from "@/server/db";
 import { createNotification } from "@/server/services/notification-service";
 import {
   getUserCoinBalance,
+  getUserFootballCredits,
   tryDeductTeamCompetitionEntryFee,
 } from "@/server/services/team-competition-wallet";
+import { assertFootballCreditConfirmationSatisfied } from "@/server/services/asset-payment-service";
 import {
   TEAM_COMP_NOTIFICATION_COPY,
   teamCompetitionKnockoutTabLink,
@@ -347,12 +349,19 @@ export async function previewTeamCompetitionRegistration(
 
   const fee = comp.registrationFeePerMember;
   const members = await Promise.all(
-    team.members.map(async (m) => ({
-      userId: m.userId,
-      name: displayName(m.user),
-      balance: await getUserCoinBalance(m.userId),
-      canPay: (await getUserCoinBalance(m.userId)) >= fee,
-    })),
+    team.members.map(async (m) => {
+      const balance = await getUserCoinBalance(m.userId);
+      return {
+        userId: m.userId,
+        name: displayName(m.user),
+        balance,
+        // Other members: coins only. Owner: coins + football credit (with confirm).
+        canPay:
+          m.userId === userId
+            ? balance + (await getUserFootballCredits(m.userId)) >= fee
+            : balance >= fee,
+      };
+    }),
   );
 
   const shortfallMembers = members.filter((m) => !m.canPay);
@@ -409,7 +418,7 @@ export async function registerTeamInCompetition(
   const preview = await previewTeamCompetitionRegistration(userId, competitionId, teamId);
 
   if (!preview.ownerCanPayOwn) {
-    throw new Error("موجودی سکه شما برای ثبت‌نام کافی نیست");
+    throw new Error("موجودی کافی نیست");
   }
 
   if (preview.needsOwnerCover && !options.ownerCoversShortfall) {
@@ -435,6 +444,29 @@ export async function registerTeamInCompetition(
     };
   }
 
+  // Total the owner will personally pay (own fee + any covered shortfalls).
+  let ownerPayTotal = 0;
+  for (const member of team.members) {
+    const balance = await getUserCoinBalance(member.userId);
+    if (balance >= fee) {
+      if (member.userId === userId) ownerPayTotal += fee;
+    } else if (options.ownerCoversShortfall) {
+      if (member.userId === userId) {
+        ownerPayTotal += fee;
+      } else {
+        ownerPayTotal += fee - balance;
+      }
+    } else if (member.userId === userId) {
+      ownerPayTotal += fee;
+    }
+  }
+
+  // Raise the Football Credit confirmation dialog before consuming energy.
+  await assertFootballCreditConfirmationSatisfied(userId, ownerPayTotal);
+
+  const { consumeEnergy } = await import("@/server/services/energy-service");
+  await consumeEnergy(userId, "TEAM_COMPETITION_REGISTRATION");
+
   const description = `ثبت‌نام تیم ${team.name} در ${comp.titleFa}`;
   const coveredRecords: Array<{
     coveredUserId: string;
@@ -444,9 +476,20 @@ export async function registerTeamInCompetition(
 
   for (const member of team.members) {
     const balance = await getUserCoinBalance(member.userId);
+    const isOwner = member.userId === userId;
+
     if (balance >= fee) {
       const result = await tryDeductTeamCompetitionEntryFee(member.userId, fee, description);
       if (!result.ok) throw new Error(`موجودی سکه ${displayName(member.user)} کافی نیست`);
+      continue;
+    }
+
+    if (isOwner) {
+      // Owner may pay their own fee with Football Credit after confirmation.
+      const result = await tryDeductTeamCompetitionEntryFee(userId, fee, description, {
+        useFootballCreditIfNeeded: true,
+      });
+      if (!result.ok) throw new Error("موجودی کافی نیست");
       continue;
     }
 
@@ -458,8 +501,13 @@ export async function registerTeamInCompetition(
     if (balance > 0) {
       await tryDeductTeamCompetitionEntryFee(member.userId, balance, description);
     }
-    const ownerResult = await tryDeductTeamCompetitionEntryFee(userId, shortfall, `${description} (متقبل‌شده)`);
-    if (!ownerResult.ok) throw new Error("موجودی سکه مالک برای متقبل شدن هزینه کافی نیست");
+    const ownerResult = await tryDeductTeamCompetitionEntryFee(
+      userId,
+      shortfall,
+      `${description} (متقبل‌شده)`,
+      { useFootballCreditIfNeeded: true },
+    );
+    if (!ownerResult.ok) throw new Error("موجودی مالک برای متقبل شدن هزینه کافی نیست");
     coveredRecords.push({
       coveredUserId: member.userId,
       coveredByUserId: userId,

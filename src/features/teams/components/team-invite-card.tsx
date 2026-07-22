@@ -6,6 +6,7 @@ import { useState } from "react";
 import { Button } from "@/shared/components/ui/button";
 import { Modal } from "@/shared/components/ui/modal";
 import { useToast } from "@/shared/components/ui/toast";
+import { useAssetPayment } from "@/shared/hooks/use-asset-payment";
 import { formatPersianNumber } from "@/shared/lib/dates";
 import {
   TEAM_JOIN_FEE,
@@ -55,6 +56,7 @@ export function TeamInviteCard({
   onUpdated: () => void;
 }) {
   const { toast } = useToast();
+  const { runWithAssetPayment } = useAssetPayment();
   const [loading, setLoading] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [conflictOpen, setConflictOpen] = useState(false);
@@ -75,7 +77,14 @@ export function TeamInviteCard({
   const accept = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/teams/invites/${invite.id}/accept`, { method: "POST" });
+      const res = await runWithAssetPayment((allowFootballCredit) =>
+        fetch(`/api/teams/invites/${invite.id}/accept`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ allowFootballCredit }),
+        }),
+      );
+      if (!res) { setConfirmOpen(false); return; }
       const json = await res.json();
       if (res.status === 409 && json.code === TEAM_MEMBERSHIP_CONFLICT_CODE) {
         setConfirmOpen(false);
@@ -99,7 +108,14 @@ export function TeamInviteCard({
   const switchTeam = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/teams/invites/${invite.id}/switch`, { method: "POST" });
+      const res = await runWithAssetPayment((allowFootballCredit) =>
+        fetch(`/api/teams/invites/${invite.id}/switch`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ allowFootballCredit }),
+        }),
+      );
+      if (!res) { setConflictOpen(false); return; }
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "خطا");
       await dismissInviteNotification(invite.id);

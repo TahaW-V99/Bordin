@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/shared/components/ui/button";
 import { Modal } from "@/shared/components/ui/modal";
 import { useToast } from "@/shared/components/ui/toast";
+import { useAssetPayment } from "@/shared/hooks/use-asset-payment";
 import { ProfileAvatar } from "@/shared/components/profile/profile-avatar";
 import { formatPersianNumber } from "@/shared/lib/dates";
 import { TEAM_EXTRA_INVITE_FEE, TEAM_INVITE_SHARE_MESSAGE } from "@/shared/constants/teams";
@@ -64,6 +65,7 @@ export function TeamMemberSelection({
   onInviteSent?: () => void;
 }) {
   const { toast } = useToast();
+  const { runWithAssetPayment } = useAssetPayment();
   const [users, setUsers] = useState<UserRow[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
@@ -131,11 +133,14 @@ export function TeamMemberSelection({
   const sendInvite = async (inviteeId: string) => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/teams/${teamId}/invite`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ inviteeId }),
-      });
+      const res = await runWithAssetPayment((allowFootballCredit) =>
+        fetch(`/api/teams/${teamId}/invite`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ inviteeId, allowFootballCredit }),
+        }),
+      );
+      if (!res) return;
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "خطا");
       setUsers((prev) =>

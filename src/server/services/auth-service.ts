@@ -211,6 +211,12 @@ async function createNewUser(normalized: string) {
     const user = devMemoryDb.user.create(normalized);
     const { ensureWelcomeNotification } = await import("@/server/services/notification-service");
     await ensureWelcomeNotification(user.id);
+    try {
+      const { ensureUserEnergy } = await import("@/server/services/energy-service");
+      await ensureUserEnergy(user.id);
+    } catch {
+      // ignore in memory mode
+    }
     return {
       id: user.id,
       phone: user.phone,
@@ -280,6 +286,16 @@ async function createNewUser(normalized: string) {
     await applyPendingLegacyImportForPhone(user.id, normalized);
   } catch (error) {
     console.error("[legacy-import] failed to apply pending data on signup", {
+      phone: normalized,
+      error: error instanceof Error ? error.message : error,
+    });
+  }
+
+  try {
+    const { ensureUserEnergy } = await import("@/server/services/energy-service");
+    await ensureUserEnergy(user.id);
+  } catch (error) {
+    console.error("[energy] failed to initialize user energy on signup", {
       phone: normalized,
       error: error instanceof Error ? error.message : error,
     });

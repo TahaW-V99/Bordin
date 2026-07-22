@@ -5,6 +5,7 @@ import { Users } from "lucide-react";
 import { Modal } from "@/shared/components/ui/modal";
 import { Button } from "@/shared/components/ui/button";
 import { useToast } from "@/shared/components/ui/toast";
+import { useAssetPayment } from "@/shared/hooks/use-asset-payment";
 import { formatPersianNumber } from "@/shared/lib/dates";
 import {
   WATCH_PARTY_FULL_MESSAGE,
@@ -33,6 +34,7 @@ export function WatchPartyJoinModal({
   onRefresh,
 }: WatchPartyJoinModalProps) {
   const { toast } = useToast();
+  const { runWithAssetPayment } = useAssetPayment();
   const [loading, setLoading] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [occupiedCount, setOccupiedCount] = useState(watchParty.occupiedCount);
@@ -75,11 +77,14 @@ export function WatchPartyJoinModal({
 
     setLoading(true);
     try {
-      const res = await fetch("/api/watch-party/join", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ roomId: watchParty.roomId }),
-      });
+      const res = await runWithAssetPayment((allowFootballCredit) =>
+        fetch("/api/watch-party/join", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ roomId: watchParty.roomId, allowFootballCredit }),
+        }),
+      );
+      if (!res) return;
       const data = await res.json();
       if (!res.ok) {
         if (data.error?.includes("کافی نیست")) {

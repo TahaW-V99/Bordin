@@ -13,6 +13,7 @@ import {
 } from "@/shared/constants/notifications";
 import { cn } from "@/shared/lib/cn";
 import { STORE_SELL_UI_ENABLED } from "@/shared/constants/store";
+import { EnergyHeaderIndicator } from "@/shared/components/energy/energy-header-indicator";
 
 export function InboxWhistleLink({ className }: { className?: string }) {
   const pathname = usePathname();
@@ -141,6 +142,7 @@ export function HeaderToolbar() {
   return (
     <div className="flex items-center gap-2">
       <InboxWhistleLink />
+      <EnergyHeaderIndicator />
       {STORE_SELL_UI_ENABLED ? <WalletHeaderLink /> : null}
       <CoinsBalanceLink />
     </div>

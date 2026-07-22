@@ -74,13 +74,16 @@ export const WHEEL_REWARDS = [300, 350, 450, 500, 600, 700, 800, 1000, 1200, 150
 
 export const COIN_PACKAGES = [
   { id: "pkg-600", nameFa: "یک مشت سکه ۶۰۰تایی", coinAmount: 600, priceToman: 24000 },
-  { id: "pkg-1200", nameFa: "یک کیسه سکه ۱۲۰۰تایی", coinAmount: 1200, priceToman: 43000 },
-  { id: "pkg-3000", nameFa: "یک جعبه سکه ۳۰۰۰تایی", coinAmount: 3000, priceToman: 102000 },
-  { id: "pkg-6000", nameFa: "یک فرغون سکه ۶۰۰۰تایی", coinAmount: 6000, priceToman: 192000 },
-  { id: "pkg-12000", nameFa: "یک وانت سکه ۱۲۰۰۰تایی", coinAmount: 12000, priceToman: 360000 },
+  { id: "pkg-1200", nameFa: "یک کیسه سکه ۱۲۰۰تایی", coinAmount: 1200, priceToman: 42000 },
+  { id: "pkg-3000", nameFa: "یک جعبه سکه ۳۰۰۰تایی", coinAmount: 3000, priceToman: 99000 },
+  { id: "pkg-6000", nameFa: "یک فرغون سکه ۶۰۰۰تایی", coinAmount: 6000, priceToman: 189000 },
+  { id: "pkg-12000", nameFa: "یک وانت سکه ۱۲۰۰۰تایی", coinAmount: 12000, priceToman: 349000 },
 ];
 
 import { bucketAccuracy } from "@/shared/lib/prediction-accuracy";
+
+/** Football Credit granted only for exact 100% prediction accuracy */
+export const FOOTBALL_CREDIT_PERFECT_REWARD = 100;
 
 export function getRewardFromTable(slug: string, accuracyPercent: number) {
   const bucket = bucketAccuracy(accuracyPercent);

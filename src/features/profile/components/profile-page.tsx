@@ -9,7 +9,6 @@ import {
 } from "@/shared/components/layout/header-toolbar";
 import { LevelBadge } from "@/shared/components/profile/level-badge";
 import { ProfileAvatar } from "@/shared/components/profile/profile-avatar";
-import { CoinBreakdown } from "@/shared/components/profile/coin-breakdown";
 import { HonorsSlider } from "@/shared/components/profile/honors-slider";
 import { type EarnedMedalInput } from "@/shared/lib/honors";
 import { StatBlock } from "@/shared/components/ui/stat-block";
@@ -17,7 +16,7 @@ import { Button } from "@/shared/components/ui/button";
 import { Skeleton } from "@/shared/components/ui/skeleton";
 import { formatPersianNumber } from "@/shared/lib/dates";
 import { userNeedsDisplayName } from "@/shared/lib/kandakator-utils";
-import { UserPlus, Share2, Settings, ClipboardList, Users, Trophy, Target } from "lucide-react";
+import { UserPlus, Share2, Settings, ClipboardList, Users, Trophy, Target, Coins } from "lucide-react";
 import { PublicProfileLink } from "@/shared/components/profile/public-profile-link";
 import { AvatarCollectionModal } from "@/features/avatar-collection/components/avatar-collection-modal";
 import { STORE_SELL_UI_ENABLED } from "@/shared/constants/store";
@@ -89,7 +88,6 @@ export function ProfilePage() {
   }
 
   const profile = data.profile as Record<string, unknown>;
-  const wallet = data.wallet as Record<string, number>;
   const earnedMedals = (data.medals as EarnedMedalInput[]) ?? [];
   const stats = data.stats as Record<string, number>;
   const level = profile?.currentLevel as { nameFa: string } | null;
@@ -180,6 +178,14 @@ export function ProfilePage() {
           ماموریت‌ها
         </Link>
 
+        <Link
+          href="/profile/assets"
+          className="flex w-full items-center justify-center gap-2 rounded-xl border border-[#f5b942]/35 bg-[#f5b942]/10 px-4 py-3 text-sm font-semibold text-white transition hover:bg-[#f5b942]/20"
+        >
+          <Coins className="h-4 w-4 text-[#ffd54a]" />
+          دارایی‌ها
+        </Link>
+
         <div className="grid grid-cols-2 gap-2">
           <Link href="/profile/predictions">
             <Button variant="outline" fullWidth className="h-auto gap-1.5 px-2 py-2.5 text-xs">
@@ -194,13 +200,6 @@ export function ProfilePage() {
             </Button>
           </Link>
         </div>
-
-        <CoinBreakdown
-          predictionRewardCoins={wallet?.predictionRewardCoins ?? 0}
-          systemRewardCoins={wallet?.systemRewardCoins ?? 0}
-          purchasedCoins={wallet?.purchasedCoins ?? 0}
-          cashBalanceToman={STORE_SELL_UI_ENABLED ? wallet?.cashBalanceToman : undefined}
-        />
 
         <div className="grid grid-cols-3 gap-2">
           <StatBlock label="پیش‌بینی" value={stats?.totalPredictions ?? 0} />

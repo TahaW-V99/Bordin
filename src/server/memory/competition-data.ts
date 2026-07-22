@@ -171,6 +171,7 @@ export function createCompetitionSeedData() {
       id: `wheel-${i}`,
       coins: option.amount,
       weight: option.weight,
+      tickets: option.tickets ? [...option.tickets] : [],
     })),
     cupEntries: [] as Array<{ id: string; cupId: string; userId: string; status: string }>,
     tournamentEntries: [] as Array<{

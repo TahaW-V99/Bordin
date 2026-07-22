@@ -12,8 +12,15 @@ import { AdminWalletPanel } from "@/features/admin/components/admin-wallet-panel
 import { AdminCompetitionsPanel } from "@/features/admin/components/admin-competitions-panel";
 import { AdminChatReportsPanel } from "@/features/admin/components/admin-chat-reports-panel";
 import { AdminWatchPartyPanel } from "@/features/admin/components/admin-watch-party-panel";
+import { AdminEnergyPanel } from "@/features/admin/components/admin-energy-panel";
 
-type AdminTab = "general" | "competitions" | "wallet" | "chat-reports" | "watch-party";
+type AdminTab =
+  | "general"
+  | "competitions"
+  | "wallet"
+  | "chat-reports"
+  | "watch-party"
+  | "energy";
 
 export function AdminDashboard() {
   const { toast } = useToast();
@@ -23,7 +30,8 @@ export function AdminDashboard() {
     initialTab === "competitions" ||
     initialTab === "wallet" ||
     initialTab === "chat-reports" ||
-    initialTab === "watch-party"
+    initialTab === "watch-party" ||
+    initialTab === "energy"
       ? initialTab
       : "general",
   );
@@ -36,7 +44,8 @@ export function AdminDashboard() {
       initialTab === "competitions" ||
       initialTab === "wallet" ||
       initialTab === "chat-reports" ||
-      initialTab === "watch-party"
+      initialTab === "watch-party" ||
+      initialTab === "energy"
     ) {
       setTab(initialTab);
     }
@@ -86,7 +95,12 @@ export function AdminDashboard() {
           <Chip active={tab === "watch-party"} onClick={() => setTab("watch-party")}>
             watch party
           </Chip>
+          <Chip active={tab === "energy"} onClick={() => setTab("energy")}>
+            سطح انرژی
+          </Chip>
         </div>
+
+        {tab === "energy" ? <AdminEnergyPanel /> : null}
 
         {tab === "watch-party" ? <AdminWatchPartyPanel /> : null}
 

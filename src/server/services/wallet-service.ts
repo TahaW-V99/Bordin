@@ -2,58 +2,28 @@ import { CoinTransactionType, CoinType, XpTransactionType } from "@prisma/client
 import { prisma } from "@/shared/lib/prisma";
 import { devMemoryDb } from "@/server/dev-memory-db";
 import { shouldUseMemoryDb } from "@/server/db";
+import { processAssetPayment } from "@/server/services/asset-payment-service";
+import type { TicketWalletField } from "@/shared/constants/tickets";
 
-export async function deductCoins(userId: string, amount: number, description: string) {
-  if (await shouldUseMemoryDb()) {
-    return devMemoryDb.wallet.deductForPrediction(userId, amount);
-  }
-
-  const wallet = await prisma.coinWallet.findUnique({ where: { userId } });
-  if (!wallet) throw new Error("کیف پول یافت نشد");
-
-  const total =
-    wallet.predictionRewardCoins + wallet.systemRewardCoins + wallet.purchasedCoins;
-  if (total < amount) throw new Error("موجودی سکه کافی نیست");
-
-  let remaining = amount;
-  let pred = 0;
-  let sys = 0;
-  let purch = 0;
-  const take = (avail: number, type: "p" | "s" | "u") => {
-    const n = Math.min(avail, remaining);
-    remaining -= n;
-    if (type === "p") purch = n;
-    if (type === "s") sys = n;
-    if (type === "u") pred = n;
-  };
-  take(wallet.purchasedCoins, "p");
-  take(wallet.systemRewardCoins, "s");
-  take(wallet.predictionRewardCoins, "u");
-
-  const updated = await prisma.coinWallet.update({
-    where: { userId },
-    data: {
-      purchasedCoins: wallet.purchasedCoins - purch,
-      systemRewardCoins: wallet.systemRewardCoins - sys,
-      predictionRewardCoins: wallet.predictionRewardCoins - pred,
-    },
+/**
+ * Deduct coins for a feature that spends assets. Delegates to the centralized
+ * {@link processAssetPayment} so the shared spending priority
+ * (purchased → reward → football credit) is enforced. When purchased + reward coins are
+ * insufficient, football credit is only used if `allowFootballCredit` is true (explicit
+ * user confirmation); otherwise a FootballCreditConfirmationRequiredError is thrown.
+ */
+export async function deductCoins(
+  userId: string,
+  amount: number,
+  description: string,
+  allowFootballCredit = false,
+) {
+  return processAssetPayment(userId, amount, {
+    type: CoinTransactionType.PREDICTION_ENTRY,
+    coinType: CoinType.PURCHASED,
+    description,
+    allowFootballCredit,
   });
-
-  const balance =
-    updated.predictionRewardCoins + updated.systemRewardCoins + updated.purchasedCoins;
-
-  await prisma.coinTransaction.create({
-    data: {
-      walletId: updated.id,
-      coinType: CoinType.PURCHASED,
-      amount: -amount,
-      balanceAfter: balance,
-      type: CoinTransactionType.PREDICTION_ENTRY,
-      description,
-    },
-  });
-
-  return updated;
 }
 
 export async function deductCoinsWithType(
@@ -61,89 +31,29 @@ export async function deductCoinsWithType(
   amount: number,
   type: CoinTransactionType,
   description: string,
+  allowFootballCredit = false,
 ) {
-  if (await shouldUseMemoryDb()) {
-    return devMemoryDb.wallet.deductForPrediction(userId, amount);
-  }
-
-  const wallet = await prisma.coinWallet.findUnique({ where: { userId } });
-  if (!wallet) throw new Error("کیف پول یافت نشد");
-
-  const total =
-    wallet.predictionRewardCoins + wallet.systemRewardCoins + wallet.purchasedCoins;
-  if (total < amount) throw new Error("موجودی سکه کافی نیست");
-
-  let remaining = amount;
-  let pred = 0;
-  let sys = 0;
-  let purch = 0;
-  const take = (avail: number, bucket: "p" | "s" | "u") => {
-    const n = Math.min(avail, remaining);
-    remaining -= n;
-    if (bucket === "p") purch = n;
-    if (bucket === "s") sys = n;
-    if (bucket === "u") pred = n;
-  };
-  take(wallet.purchasedCoins, "p");
-  take(wallet.systemRewardCoins, "s");
-  take(wallet.predictionRewardCoins, "u");
-
-  const updated = await prisma.coinWallet.update({
-    where: { userId },
-    data: {
-      purchasedCoins: wallet.purchasedCoins - purch,
-      systemRewardCoins: wallet.systemRewardCoins - sys,
-      predictionRewardCoins: wallet.predictionRewardCoins - pred,
-    },
+  return processAssetPayment(userId, amount, {
+    type,
+    coinType: CoinType.SYSTEM_REWARD,
+    description,
+    allowFootballCredit,
   });
-
-  const balance =
-    updated.predictionRewardCoins + updated.systemRewardCoins + updated.purchasedCoins;
-
-  await prisma.coinTransaction.create({
-    data: {
-      walletId: updated.id,
-      coinType: CoinType.SYSTEM_REWARD,
-      amount: -amount,
-      balanceAfter: balance,
-      type,
-      description,
-    },
-  });
-
-  return updated;
 }
 
+/**
+ * Grant reward coins. Historically wrote to predictionRewardCoins; the product
+ * model now has a single "سکه جایزه" bucket (systemRewardCoins), so new grants
+ * go there. Existing predictionRewardCoins are merged by
+ * prisma/migrate-prediction-coins-to-system.mjs.
+ */
 export async function addPredictionRewardCoins(
   userId: string,
   amount: number,
   type: CoinTransactionType,
   description: string,
 ) {
-  if (await shouldUseMemoryDb()) {
-    return devMemoryDb.wallet.addPredictionReward(userId, amount);
-  }
-
-  const wallet = await prisma.coinWallet.update({
-    where: { userId },
-    data: { predictionRewardCoins: { increment: amount } },
-  });
-
-  const balance =
-    wallet.predictionRewardCoins + wallet.systemRewardCoins + wallet.purchasedCoins;
-
-  await prisma.coinTransaction.create({
-    data: {
-      walletId: wallet.id,
-      coinType: CoinType.PREDICTION_REWARD,
-      amount,
-      balanceAfter: balance,
-      type,
-      description,
-    },
-  });
-
-  return wallet;
+  return addSystemRewardCoins(userId, amount, type, description);
 }
 
 /** Positive or negative adjustment after prediction re-scoring. */
@@ -224,6 +134,36 @@ export async function addSystemRewardCoins(
   });
 
   return wallet;
+}
+
+/** Grant one or more ticket types to the user's wallet (no spending). */
+export async function grantTickets(
+  userId: string,
+  grants: Array<{ ticketType: TicketWalletField; quantity: number }>,
+) {
+  const increments = grants
+    .map((grant) => ({
+      ticketType: grant.ticketType,
+      quantity: Math.floor(grant.quantity),
+    }))
+    .filter((grant) => grant.quantity > 0);
+
+  if (increments.length === 0) return null;
+
+  if (await shouldUseMemoryDb()) {
+    return devMemoryDb.wallet.addTickets(userId, increments);
+  }
+
+  const data: Partial<Record<TicketWalletField, { increment: number }>> = {};
+  for (const grant of increments) {
+    const prev = data[grant.ticketType]?.increment ?? 0;
+    data[grant.ticketType] = { increment: prev + grant.quantity };
+  }
+
+  return prisma.coinWallet.update({
+    where: { userId },
+    data,
+  });
 }
 
 /** کسر هزینه گردونه از هر سه نوع سکه؛ اگر مجموع صفر شود اعمال نمی‌شود. */
@@ -321,6 +261,29 @@ export async function addPurchasedCoins(
   });
 
   return wallet;
+}
+
+export async function adjustFootballCredits(userId: string, delta: number) {
+  if (delta === 0) return null;
+
+  if (await shouldUseMemoryDb()) {
+    return devMemoryDb.wallet.adjustFootballCredits(userId, delta);
+  }
+
+  if (delta > 0) {
+    return prisma.coinWallet.update({
+      where: { userId },
+      data: { footballCredits: { increment: delta } },
+    });
+  }
+
+  const wallet = await prisma.coinWallet.findUnique({ where: { userId } });
+  if (!wallet) throw new Error("کیف پول یافت نشد");
+  const next = Math.max(0, wallet.footballCredits + delta);
+  return prisma.coinWallet.update({
+    where: { userId },
+    data: { footballCredits: next },
+  });
 }
 
 export async function sellPredictionCoins(_userId: string, _coinAmount: number) {

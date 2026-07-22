@@ -18,6 +18,7 @@ import { Button } from "@/shared/components/ui/button";
 import { Modal } from "@/shared/components/ui/modal";
 import { ClickTooltip } from "@/shared/components/ui/click-tooltip";
 import { useToast } from "@/shared/components/ui/toast";
+import { useAssetPayment } from "@/shared/hooks/use-asset-payment";
 import { Skeleton } from "@/shared/components/ui/skeleton";
 import { HonorsSlider } from "@/shared/components/profile/honors-slider";
 import { ProfileAvatar } from "@/shared/components/profile/profile-avatar";
@@ -171,6 +172,7 @@ function RosterRow({
 export function TeamDetailPage({ teamId }: { teamId: string }) {
   const router = useRouter();
   const { toast } = useToast();
+  const { runWithAssetPayment } = useAssetPayment();
   const [team, setTeam] = useState<TeamDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
@@ -260,11 +262,14 @@ export function TeamDetailPage({ teamId }: { teamId: string }) {
   const rename = async () => {
     setActionLoading(true);
     try {
-      const res = await fetch(`/api/teams/${teamId}/rename`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: newName }),
-      });
+      const res = await runWithAssetPayment((allowFootballCredit) =>
+        fetch(`/api/teams/${teamId}/rename`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: newName, allowFootballCredit }),
+        }),
+      );
+      if (!res) { setRenameOpen(false); return; }
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "خطا");
       toast("نام تیم تغییر کرد", "success");
@@ -284,11 +289,14 @@ export function TeamDetailPage({ teamId }: { teamId: string }) {
       const needsPurchase =
         isPaidTeamLogo(logoKey) && !team?.unlockedLogos.includes(logoKey);
       if (needsPurchase) {
-        const purchaseRes = await fetch("/api/teams/logos/purchase", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ logoKey }),
-        });
+        const purchaseRes = await runWithAssetPayment((allowFootballCredit) =>
+          fetch("/api/teams/logos/purchase", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ logoKey, allowFootballCredit }),
+          }),
+        );
+        if (!purchaseRes) { setLogoOpen(false); return; }
         const purchaseJson = await purchaseRes.json();
         if (!purchaseRes.ok) throw new Error(purchaseJson.error ?? "خطا در خرید لوگو");
       }
@@ -314,9 +322,14 @@ export function TeamDetailPage({ teamId }: { teamId: string }) {
     if (!removeTarget) return;
     setActionLoading(true);
     try {
-      const res = await fetch(`/api/teams/${teamId}/members/${removeTarget.id}`, {
-        method: "DELETE",
-      });
+      const res = await runWithAssetPayment((allowFootballCredit) =>
+        fetch(`/api/teams/${teamId}/members/${removeTarget.id}`, {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ allowFootballCredit }),
+        }),
+      );
+      if (!res) { setRemoveTarget(null); return; }
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "خطا");
       toast("عضو از تیم حذف شد", "success");
@@ -352,7 +365,14 @@ export function TeamDetailPage({ teamId }: { teamId: string }) {
   const leave = async () => {
     setActionLoading(true);
     try {
-      const res = await fetch(`/api/teams/${teamId}/leave`, { method: "POST" });
+      const res = await runWithAssetPayment((allowFootballCredit) =>
+        fetch(`/api/teams/${teamId}/leave`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ allowFootballCredit }),
+        }),
+      );
+      if (!res) return;
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "خطا");
       toast("تیم را ترک کردید", "success");

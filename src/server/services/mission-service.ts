@@ -1,7 +1,4 @@
-import {
-  CoinTransactionType,
-  XpTransactionType,
-} from "@prisma/client";
+import { XpTransactionType } from "@prisma/client";
 import { prisma } from "@/shared/lib/prisma";
 import { shouldUseMemoryDb } from "@/server/db";
 import { devMemoryDb } from "@/server/dev-memory-db";
@@ -19,7 +16,7 @@ import type {
   MissionTierView,
 } from "@/shared/types/missions";
 import { countSuccessfulInvites } from "@/server/services/invite-service";
-import { addSystemRewardCoins, addXpWithLevelUp } from "@/server/services/wallet-service";
+import { adjustFootballCredits, addXpWithLevelUp } from "@/server/services/wallet-service";
 
 type ProgressSnapshot = {
   inviteCount: number;
@@ -247,16 +244,12 @@ async function distributeTierRewards(
   const description = `پاداش ماموریت ${mission.titleFa} — ${tier.tierLabelFa}`;
 
   // Per-invite rewards for "davat" are granted at signup via invite-service.
-  const coinsToGrant = mission.slug === "davat" ? 0 : tier.coins;
+  // Mission medal rewards now grant Football Credit instead of coins.
+  const creditToGrant = mission.slug === "davat" ? 0 : tier.coins;
   const xpToGrant = mission.slug === "davat" ? 0 : tier.xp;
 
-  if (coinsToGrant > 0) {
-    await addSystemRewardCoins(
-      userId,
-      coinsToGrant,
-      CoinTransactionType.MISSION_REWARD,
-      description,
-    );
+  if (creditToGrant > 0) {
+    await adjustFootballCredits(userId, creditToGrant);
   }
 
   if (xpToGrant > 0) {
@@ -270,7 +263,7 @@ async function distributeTierRewards(
   return {
     missionSlug: mission.slug,
     tierKey: tier.tierKey,
-    coins: coinsToGrant,
+    coins: creditToGrant,
     xp: xpToGrant,
     medalSlug: tier.medalSlug,
     medalTitleFa: enriched.medalTitleFa,

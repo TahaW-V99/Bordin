@@ -7,6 +7,7 @@ import { Button } from "@/shared/components/ui/button";
 import { Badge } from "@/shared/components/ui/badge";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { useToast } from "@/shared/components/ui/toast";
+import { useAssetPayment } from "@/shared/hooks/use-asset-payment";
 import { formatPersianNumber, formatTehranDateTime } from "@/shared/lib/dates";
 import { translateTeamNameToFa } from "@/shared/lib/football-names-fa";
 import { Minus, Plus } from "lucide-react";
@@ -14,6 +15,7 @@ import { Minus, Plus } from "lucide-react";
 export function CupDetail({ cupId }: { cupId: string }) {
   const router = useRouter();
   const { toast } = useToast();
+  const { runWithAssetPayment } = useAssetPayment();
   const [cup, setCup] = useState<Record<string, unknown> | null>(null);
   const [home, setHome] = useState(0);
   const [away, setAway] = useState(0);
@@ -31,9 +33,16 @@ export function CupDetail({ cupId }: { cupId: string }) {
 
   const join = async () => {
     setLoading(true);
-    const res = await fetch(`/api/cups/${cupId}/join`, { method: "POST" });
-    const data = await res.json();
+    const res = await runWithAssetPayment((allowFootballCredit) =>
+      fetch(`/api/cups/${cupId}/join`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ allowFootballCredit }),
+      }),
+    );
     setLoading(false);
+    if (!res) return;
+    const data = await res.json();
     if (!res.ok) { toast(data.error, "error"); return; }
     toast("ثبت‌نام در جام انجام شد", "success");
     load();

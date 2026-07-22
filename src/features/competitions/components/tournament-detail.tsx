@@ -6,6 +6,7 @@ import { PageHeader } from "@/shared/components/layout/page-header";
 import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { useToast } from "@/shared/components/ui/toast";
+import { useAssetPayment } from "@/shared/hooks/use-asset-payment";
 import { formatPersianNumber, formatTehranDateTime } from "@/shared/lib/dates";
 import { translateTeamNameToFa } from "@/shared/lib/football-names-fa";
 import { Minus, Plus } from "lucide-react";
@@ -14,6 +15,7 @@ import Link from "next/link";
 export function TournamentDetail({ tournamentId }: { tournamentId: string }) {
   const router = useRouter();
   const { toast } = useToast();
+  const { runWithAssetPayment } = useAssetPayment();
   const [tournament, setTournament] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(false);
   const [scores, setScores] = useState<Record<string, { home: number; away: number }>>({});
@@ -28,9 +30,16 @@ export function TournamentDetail({ tournamentId }: { tournamentId: string }) {
 
   const register = async () => {
     setLoading(true);
-    const res = await fetch(`/api/tournaments/${tournamentId}/register`, { method: "POST" });
-    const data = await res.json();
+    const res = await runWithAssetPayment((allowFootballCredit) =>
+      fetch(`/api/tournaments/${tournamentId}/register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ allowFootballCredit }),
+      }),
+    );
     setLoading(false);
+    if (!res) return;
+    const data = await res.json();
     if (!res.ok) { toast(data.error, "error"); return; }
     toast("ثبت‌نام در تورنمنت انجام شد", "success");
     load();
@@ -39,13 +48,21 @@ export function TournamentDetail({ tournamentId }: { tournamentId: string }) {
   const predict = async (matchId: string) => {
     const s = scores[matchId] ?? { home: 0, away: 0 };
     setLoading(true);
-    const res = await fetch(`/api/tournaments/${tournamentId}/predict`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ matchId, homePrediction: s.home, awayPrediction: s.away }),
-    });
-    const data = await res.json();
+    const res = await runWithAssetPayment((allowFootballCredit) =>
+      fetch(`/api/tournaments/${tournamentId}/predict`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          matchId,
+          homePrediction: s.home,
+          awayPrediction: s.away,
+          allowFootballCredit,
+        }),
+      }),
+    );
     setLoading(false);
+    if (!res) return;
+    const data = await res.json();
     if (!res.ok) { toast(data.error, "error"); return; }
     toast("پیش‌بینی ثبت شد", "success");
     load();

@@ -1,9 +1,17 @@
-import { CoinTransactionType, CoinType, PaymentStatus, Prisma } from "@prisma/client";
+import { PaymentStatus, Prisma } from "@prisma/client";
 import { prisma } from "@/shared/lib/prisma";
 import { shouldUseMemoryDb } from "@/server/db";
 import { devMemoryDb } from "@/server/dev-memory-db";
-import { BUY_COIN_PACKAGES, SELL_COIN_PACKAGES } from "@/shared/constants/store";
-import { addPurchasedCoins, sellPredictionCoins } from "./wallet-service";
+import {
+  BUY_COIN_PACKAGES,
+  SELL_COIN_PACKAGES,
+  STORE_PRODUCTS,
+  findStoreProduct,
+  getStoreProductsByCategory,
+  type StoreProduct,
+} from "@/shared/constants/store";
+import { addPurchasedCoins, grantTickets, sellPredictionCoins } from "./wallet-service";
+import { grantPurchasedEnergy } from "./energy-service";
 import { isPaymentGatewayMockMode } from "./payment-gateway";
 import { logPaymentEvent } from "./payment-logger";
 import { createZibalPaymentRequest, tomanToRials, verifyZibalPayment } from "./zibal-service";
@@ -19,16 +27,46 @@ export function resolvePaymentReturnOrigin(
 const FINAL_STATUSES: PaymentStatus[] = ["PAID", "FAILED"];
 
 export async function getCoinPackages() {
-  return BUY_COIN_PACKAGES;
+  return getStoreProductsByCategory("coins");
+}
+
+export async function getStoreCatalog() {
+  return {
+    bundles: getStoreProductsByCategory("bundle"),
+    coins: getStoreProductsByCategory("coins"),
+    tickets: getStoreProductsByCategory("tickets"),
+    energy: getStoreProductsByCategory("energy"),
+  };
+}
+
+export function resolveStoreProduct(packageId: string): StoreProduct {
+  const product = findStoreProduct(packageId);
+  if (!product) throw new Error("بسته یافت نشد");
+  return product;
+}
+
+async function grantStoreProductAssets(userId: string, product: StoreProduct) {
+  for (const grant of product.grants) {
+    if (grant.kind === "purchasedCoins") {
+      await addPurchasedCoins(userId, grant.amount, `خرید ${product.nameFa}`);
+      continue;
+    }
+    if (grant.kind === "ticket") {
+      await grantTickets(userId, [
+        { ticketType: grant.ticketType, quantity: grant.quantity },
+      ]);
+      continue;
+    }
+    await grantPurchasedEnergy(userId, grant.percent);
+  }
 }
 
 export async function buyPackage(userId: string, packageId: string, method: "wallet" | "gateway") {
   if (await shouldUseMemoryDb()) {
-    return devMemoryDb.store.buyPackage(userId, packageId, method);
+    return await devMemoryDb.store.buyPackage(userId, packageId, method);
   }
 
-  const pkg = BUY_COIN_PACKAGES.find((p) => p.id === packageId);
-  if (!pkg) throw new Error("بسته یافت نشد");
+  const pkg = resolveStoreProduct(packageId);
 
   if (method === "wallet") {
     const wallet = await prisma.coinWallet.findUnique({ where: { userId } });
@@ -39,7 +77,7 @@ export async function buyPackage(userId: string, packageId: string, method: "wal
       where: { userId },
       data: { cashBalanceToman: { decrement: pkg.priceToman } },
     });
-    await addPurchasedCoins(userId, pkg.coinAmount, `خرید ${pkg.nameFa}`);
+    await grantStoreProductAssets(userId, pkg);
     const result = await prisma.paymentTransaction.create({
       data: {
         userId,
@@ -216,8 +254,7 @@ export async function verifyAndFinalizeGatewayPayment(input: {
     return { status: nextStatus, alreadyFinalized: false };
   }
 
-  const pkg = BUY_COIN_PACKAGES.find((p) => p.id === payment.packageId);
-  if (!pkg) throw new Error("بسته خرید معتبر نیست");
+  const pkg = resolveStoreProduct(payment.packageId ?? "");
 
   const updated = await prisma.paymentTransaction.updateMany({
     where: {
@@ -240,7 +277,7 @@ export async function verifyAndFinalizeGatewayPayment(input: {
     };
   }
 
-  await addPurchasedCoins(payment.userId, pkg.coinAmount, `خرید ${pkg.nameFa}`);
+  await grantStoreProductAssets(payment.userId, pkg);
 
   logPaymentEvent({
     step: "verification_success",
@@ -255,7 +292,7 @@ export async function verifyAndFinalizeGatewayPayment(input: {
     step: "coins_granted",
     paymentId: payment.id,
     userId: payment.userId,
-    metadata: { coins: pkg.coinAmount },
+    metadata: { coins: pkg.coinAmount, packageId: pkg.id, category: pkg.category },
   });
 
   return {
@@ -301,16 +338,22 @@ export async function getPurchaseHistory(userId: string) {
 
   try {
     const rows = await prisma.paymentTransaction.findMany({
-      where: { userId, status: "PAID", coinsGranted: { gt: 0 } },
+      where: { userId, status: "PAID" },
       orderBy: { createdAt: "desc" },
       take: 30,
     });
-    return rows.map((row) => ({
-      id: row.id,
-      createdAt: row.createdAt.toISOString(),
-      amountToman: row.amountToman,
-      coinsGranted: row.coinsGranted,
-    }));
+    return rows.map((row) => {
+      const product = row.packageId ? findStoreProduct(row.packageId) : undefined;
+      return {
+        id: row.id,
+        createdAt: row.createdAt.toISOString(),
+        amountToman: row.amountToman,
+        coinsGranted: row.coinsGranted,
+        packageId: row.packageId,
+        packageNameFa: product?.nameFa ?? null,
+        category: product?.category ?? null,
+      };
+    });
   } catch (error) {
     console.error("[store] purchase history prisma query failed, using raw fallback:", error);
     try {
@@ -320,20 +363,27 @@ export async function getPurchaseHistory(userId: string) {
           createdAt: Date;
           amountToman: number;
           coinsGranted: number;
+          packageId: string | null;
         }>
       >`
-        SELECT id, createdAt, amountToman, coinsGranted
+        SELECT id, createdAt, amountToman, coinsGranted, packageId
         FROM payment_transactions
-        WHERE userId = ${userId} AND coinsGranted > 0
+        WHERE userId = ${userId} AND status = 'PAID'
         ORDER BY createdAt DESC
         LIMIT 30
       `;
-      return rows.map((row) => ({
-        id: row.id,
-        createdAt: row.createdAt.toISOString(),
-        amountToman: row.amountToman,
-        coinsGranted: row.coinsGranted,
-      }));
+      return rows.map((row) => {
+        const product = row.packageId ? findStoreProduct(row.packageId) : undefined;
+        return {
+          id: row.id,
+          createdAt: row.createdAt.toISOString(),
+          amountToman: row.amountToman,
+          coinsGranted: row.coinsGranted,
+          packageId: row.packageId,
+          packageNameFa: product?.nameFa ?? null,
+          category: product?.category ?? null,
+        };
+      });
     } catch (fallbackError) {
       console.error("[store] purchase history raw fallback failed:", fallbackError);
       return [];
@@ -406,4 +456,4 @@ export async function getWalletDetails(userId: string) {
   return { wallet, transactions: wallet?.transactions ?? [] };
 }
 
-export { BUY_COIN_PACKAGES };
+export { BUY_COIN_PACKAGES, STORE_PRODUCTS };

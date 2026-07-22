@@ -5,6 +5,7 @@ import { ChevronLeft, ChevronRight, Lock, Sparkles } from "lucide-react";
 import { Modal } from "@/shared/components/ui/modal";
 import { Button } from "@/shared/components/ui/button";
 import { useToast } from "@/shared/components/ui/toast";
+import { useAssetPayment } from "@/shared/hooks/use-asset-payment";
 import { AvatarPurchaseDialog } from "@/features/avatar-collection/components/avatar-purchase-dialog";
 import {
   AVATAR_PURCHASE_COST,
@@ -31,17 +32,6 @@ type AvatarCollectionModalProps = {
 async function patchJson<T>(url: string, body: unknown): Promise<T> {
   const res = await fetch(url, {
     method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error ?? "خطا در ارتباط با سرور");
-  return data as T;
-}
-
-async function postJson<T>(url: string, body: unknown): Promise<T> {
-  const res = await fetch(url, {
-    method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
@@ -107,6 +97,7 @@ export function AvatarCollectionModal({
   onAvatarUpdated,
 }: AvatarCollectionModalProps) {
   const { toast } = useToast();
+  const { runWithAssetPayment } = useAssetPayment();
   const [page, setPage] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [slideKey, setSlideKey] = useState(0);
@@ -191,12 +182,22 @@ export function AvatarCollectionModal({
     if (!selectedId) return;
     setSaving(true);
     try {
-      const result = await postJson<{
+      const res = await runWithAssetPayment((allowFootballCredit) =>
+        fetch("/api/settings/avatar/purchase", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ avatarId: selectedId, allowFootballCredit }),
+        }),
+      );
+      if (!res) { setPurchaseOpen(false); return; }
+      const result = (await res.json()) as {
         avatarUrl: string;
         avatarSrc: string;
         coinsDeducted: number;
         unlockedAvatarIds: string[];
-      }>("/api/settings/avatar/purchase", { avatarId: selectedId });
+        error?: string;
+      };
+      if (!res.ok) throw new Error(result.error ?? "خطا در ارتباط با سرور");
 
       onAvatarUpdated({
         avatarUrl: result.avatarUrl,

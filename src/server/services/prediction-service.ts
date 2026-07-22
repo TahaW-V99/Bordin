@@ -11,6 +11,8 @@ import { getPredictionDeadlineInstant, effectivePredictionCutoffMinutes } from "
 import { resolveDailyPredictionEntryFee } from "@/server/services/team-competition-prediction-fee-service";
 import { blockNonCaptainKnockoutDailySubmit } from "@/server/services/team-competition-knockout-prediction-service";
 import { DisplayNameRequiredError } from "@/server/services/prediction-errors";
+import { FootballCreditConfirmationRequiredError } from "@/server/services/asset-payment-errors";
+import { isFootballCreditAllowed } from "@/server/services/asset-payment-context";
 import { parseFixtureExternalId } from "@/server/services/fixture-api";
 
 export { DisplayNameRequiredError } from "@/server/services/prediction-errors";
@@ -40,6 +42,7 @@ export async function submitDailyPrediction(
   kandakatorId: string,
   homePrediction: number,
   awayPrediction: number,
+  allowFootballCredit = false,
 ) {
   await assertCanPredict(userId);
 
@@ -64,17 +67,12 @@ export async function submitDailyPrediction(
       leagueName: km.match.leagueName,
       externalId: parseFixtureExternalId(km.matchId) ? km.matchId : null,
     });
-    const wallet = devMemoryDb.wallet.getByUserId(userId);
-    const total =
-      (wallet?.predictionRewardCoins ?? 0) +
-      (wallet?.systemRewardCoins ?? 0) +
-      (wallet?.purchasedCoins ?? 0);
-    if (total < entryFee) {
-      throw new Error("موجودی سکه کافی نیست");
-    }
+
+    const { consumeEnergy } = await import("@/server/services/energy-service");
+    await consumeEnergy(userId, "PREDICTION");
 
     if (entryFee > 0) {
-      devMemoryDb.wallet.deductForPrediction(userId, entryFee);
+      devMemoryDb.wallet.spendAssets(userId, entryFee, allowFootballCredit);
     }
     const prediction = devMemoryDb.predictions.create({
       userId,
@@ -134,12 +132,26 @@ export async function submitDailyPrediction(
   const wallet = await prisma.coinWallet.findUnique({ where: { userId } });
   if (!wallet) throw new Error("کیف پول یافت نشد");
 
-  const totalCoins =
+  const coinBalance =
     wallet.predictionRewardCoins + wallet.systemRewardCoins + wallet.purchasedCoins;
 
-  if (totalCoins < entryFee) {
-    throw new Error("موجودی سکه کافی نیست");
+  // Football-credit spending priority for paid (competition) matches. Standard matches are
+  // free (entryFee === 0) and never reach this gate.
+  if (entryFee > 0 && coinBalance < entryFee) {
+    if (coinBalance + wallet.footballCredits < entryFee) {
+      throw new Error("موجودی کافی نیست");
+    }
+    if (!allowFootballCredit && !isFootballCreditAllowed()) {
+      throw new FootballCreditConfirmationRequiredError(
+        entryFee,
+        coinBalance,
+        wallet.footballCredits,
+      );
+    }
   }
+
+  const { consumeEnergy } = await import("@/server/services/energy-service");
+  await consumeEnergy(userId, "PREDICTION");
 
   return prisma.$transaction(async (tx) => {
     // Free (standard) matches: no coins are deducted and no entry transaction is recorded.
@@ -164,12 +176,19 @@ export async function submitDailyPrediction(
       spendFrom(wallet.systemRewardCoins, "sys");
       spendFrom(wallet.predictionRewardCoins, "pred");
 
+      // Remainder (if any) is covered by football credit after explicit confirmation.
+      const footballDeduct = remaining;
+      const coinPortion = entryFee - footballDeduct;
+
       const updatedWallet = await tx.coinWallet.update({
         where: { userId },
         data: {
           purchasedCoins: wallet.purchasedCoins - purchDeduct,
           systemRewardCoins: wallet.systemRewardCoins - sysDeduct,
           predictionRewardCoins: wallet.predictionRewardCoins - predDeduct,
+          ...(footballDeduct > 0
+            ? { footballCredits: Math.max(0, wallet.footballCredits - footballDeduct) }
+            : {}),
         },
       });
 
@@ -178,17 +197,19 @@ export async function submitDailyPrediction(
         updatedWallet.systemRewardCoins +
         updatedWallet.purchasedCoins;
 
-      await tx.coinTransaction.create({
-        data: {
-          walletId: updatedWallet.id,
-          coinType: CoinType.PURCHASED,
-          amount: -entryFee,
-          balanceAfter: newBalance,
-          type: CoinTransactionType.PREDICTION_ENTRY,
-          referenceId: matchId,
-          description: "ورودی پیش‌بینی روزانه",
-        },
-      });
+      if (coinPortion > 0) {
+        await tx.coinTransaction.create({
+          data: {
+            walletId: updatedWallet.id,
+            coinType: CoinType.PURCHASED,
+            amount: -coinPortion,
+            balanceAfter: newBalance,
+            type: CoinTransactionType.PREDICTION_ENTRY,
+            referenceId: matchId,
+            description: "ورودی پیش‌بینی روزانه",
+          },
+        });
+      }
     }
 
     const prediction = await tx.prediction.create({

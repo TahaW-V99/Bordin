@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { ToastProvider } from "@/shared/components/ui/toast";
+import { AssetPaymentProvider } from "@/shared/hooks/use-asset-payment";
 import { PUBLIC_SITE } from "@/features/public/data/site-config";
 import { buildPublicPageMetadata } from "@/features/public/lib/seo";
 import { isProductionEnvironment } from "@/shared/lib/environment";
@@ -52,7 +53,9 @@ export default function RootLayout({
   return (
     <html lang="fa" dir="rtl">
       <body className="font-sans antialiased">
-        <ToastProvider>{children}</ToastProvider>
+        <ToastProvider>
+          <AssetPaymentProvider>{children}</AssetPaymentProvider>
+        </ToastProvider>
       </body>
     </html>
   );

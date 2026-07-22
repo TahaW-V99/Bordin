@@ -120,6 +120,9 @@ export async function processReferralOnSignup(
         "@/server/services/mission-service"
       );
       void tryAutoCompleteInviteMission(inviter.id);
+      void import("@/server/services/energy-service").then(({ applyInviteEnergyRecovery }) =>
+        applyInviteEnergyRecovery(inviter.id),
+      );
       return { processed: true as const };
     } catch {
       return { processed: false as const };
@@ -188,6 +191,10 @@ export async function processReferralOnSignup(
     "@/server/services/mission-service"
   );
   void tryAutoCompleteInviteMission(inviter.id);
+
+  void import("@/server/services/energy-service").then(({ applyInviteEnergyRecovery }) =>
+    applyInviteEnergyRecovery(inviter.id),
+  );
 
   return { processed: true as const, inviterRewarded: inviterGetsReward };
 }

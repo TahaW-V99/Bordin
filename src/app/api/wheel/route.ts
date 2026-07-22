@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/shared/lib/auth";
-import { getApiErrorMessage } from "@/shared/lib/api-errors";
+import { jsonCaughtError } from "@/shared/lib/api-route";
 import { getWheelStatus, spinWheel } from "@/server/services/wheel-service";
 
 export async function GET() {
@@ -10,7 +10,7 @@ export async function GET() {
     const status = await getWheelStatus(session.userId);
     return NextResponse.json(status);
   } catch (error) {
-    return NextResponse.json({ error: getApiErrorMessage(error) }, { status: 400 });
+    return jsonCaughtError(error);
   }
 }
 
@@ -21,6 +21,6 @@ export async function POST() {
     const result = await spinWheel(session.userId);
     return NextResponse.json({ success: true, ...result });
   } catch (error) {
-    return NextResponse.json({ error: getApiErrorMessage(error) }, { status: 400 });
+    return jsonCaughtError(error);
   }
 }

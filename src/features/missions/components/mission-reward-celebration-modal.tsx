@@ -69,7 +69,7 @@ export function MissionRewardCelebrationModal({
           {reward.coins > 0 ? (
             <>
               <span className="font-bold text-[#ffd54a]">
-                {formatPersianNumber(reward.coins)} سکه
+                {formatPersianNumber(reward.coins)} اعتبار
               </span>
               {reward.xp > 0 ? " و " : ""}
             </>

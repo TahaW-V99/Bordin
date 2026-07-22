@@ -4,6 +4,7 @@ import { shouldUseMemoryDb } from "@/server/db";
 import { devMemoryDb } from "@/server/dev-memory-db";
 import { assertTeamCompetitionRegistrationAllowed } from "@/server/services/team-competition-registration-rules";
 import { deductCoins, addPredictionRewardCoins, addXp } from "./wallet-service";
+import { assertFootballCreditConfirmationSatisfied } from "@/server/services/asset-payment-service";
 import { getRewardFromTable } from "@/shared/constants/reward-tables";
 import { localizeFootballMatch } from "@/shared/lib/football-names-fa";
 import { getPredictionDeadlineInstant, effectivePredictionCutoffMinutes } from "@/shared/lib/dates";
@@ -101,9 +102,11 @@ export async function getCup(id: string, userId: string) {
   };
 }
 
-export async function joinCup(cupId: string, userId: string) {
+export async function joinCup(cupId: string, userId: string, allowFootballCredit = false) {
   if (await shouldUseMemoryDb()) {
-    return devMemoryDb.competitions.joinCup(cupId, userId);
+    const { consumeEnergy } = await import("@/server/services/energy-service");
+    await consumeEnergy(userId, "CUP_REGISTRATION");
+    return devMemoryDb.competitions.joinCup(cupId, userId, allowFootballCredit);
   }
 
   const cup = await prisma.cup.findUnique({ where: { id: cupId } });
@@ -115,7 +118,12 @@ export async function joinCup(cupId: string, userId: string) {
   });
   if (existing) throw new Error("شما قبلاً ثبت‌نام کرده‌اید");
 
-  await deductCoins(userId, cup.entryFeeCoins, `ورودی جام ${cup.titleFa}`);
+  await assertFootballCreditConfirmationSatisfied(userId, cup.entryFeeCoins);
+
+  const { consumeEnergy } = await import("@/server/services/energy-service");
+  await consumeEnergy(userId, "CUP_REGISTRATION");
+
+  await deductCoins(userId, cup.entryFeeCoins, `ورودی جام ${cup.titleFa}`, allowFootballCredit);
 
   const entry = await prisma.cupEntry.create({
     data: { cupId, userId, status: "REGISTERED" },
@@ -253,9 +261,15 @@ export async function getTournament(id: string, userId: string) {
   };
 }
 
-export async function registerTournament(tournamentId: string, userId: string) {
+export async function registerTournament(
+  tournamentId: string,
+  userId: string,
+  allowFootballCredit = false,
+) {
   if (await shouldUseMemoryDb()) {
-    return devMemoryDb.competitions.registerTournament(tournamentId, userId);
+    const { consumeEnergy } = await import("@/server/services/energy-service");
+    await consumeEnergy(userId, "TOURNAMENT_REGISTRATION");
+    return devMemoryDb.competitions.registerTournament(tournamentId, userId, allowFootballCredit);
   }
 
   const tournament = await prisma.tournament.findUnique({ where: { id: tournamentId } });
@@ -267,7 +281,17 @@ export async function registerTournament(tournamentId: string, userId: string) {
   });
   if (existing) throw new Error("قبلاً ثبت‌نام کرده‌اید");
 
-  await deductCoins(userId, tournament.registrationFeeCoins, `ثبت‌نام ${tournament.nameFa}`);
+  await assertFootballCreditConfirmationSatisfied(userId, tournament.registrationFeeCoins);
+
+  const { consumeEnergy } = await import("@/server/services/energy-service");
+  await consumeEnergy(userId, "TOURNAMENT_REGISTRATION");
+
+  await deductCoins(
+    userId,
+    tournament.registrationFeeCoins,
+    `ثبت‌نام ${tournament.nameFa}`,
+    allowFootballCredit,
+  );
 
   const entry = await prisma.tournamentEntry.create({
     data: { tournamentId, userId, status: "REGISTERED" },
@@ -287,6 +311,7 @@ export async function predictTournament(
   matchId: string,
   homePrediction: number,
   awayPrediction: number,
+  allowFootballCredit = false,
 ) {
   if (await shouldUseMemoryDb()) {
     return devMemoryDb.competitions.predictTournament(
@@ -295,6 +320,7 @@ export async function predictTournament(
       matchId,
       homePrediction,
       awayPrediction,
+      allowFootballCredit,
     );
   }
 
@@ -322,7 +348,12 @@ export async function predictTournament(
   });
   if (existing) throw new Error("پیش‌بینی این مسابقه ثبت شده");
 
-  await deductCoins(userId, tournament.predictionFeeCoins, `پیش‌بینی تورنمنت ${tournament.nameFa}`);
+  await deductCoins(
+    userId,
+    tournament.predictionFeeCoins,
+    `پیش‌بینی تورنمنت ${tournament.nameFa}`,
+    allowFootballCredit,
+  );
 
   return prisma.prediction.create({
     data: {

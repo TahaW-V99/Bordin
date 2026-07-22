@@ -7,6 +7,7 @@ import { PageHeader } from "@/shared/components/layout/page-header";
 import { Button } from "@/shared/components/ui/button";
 import { Modal } from "@/shared/components/ui/modal";
 import { useToast } from "@/shared/components/ui/toast";
+import { useAssetPayment } from "@/shared/hooks/use-asset-payment";
 import { Skeleton } from "@/shared/components/ui/skeleton";
 import { TeamIntroSlider } from "@/features/teams/components/team-intro-slider";
 import { TeamLogo } from "@/features/teams/components/team-logo";
@@ -65,6 +66,7 @@ function StepActions({
 export function TeamCreatePage() {
   const router = useRouter();
   const { toast } = useToast();
+  const { runWithAssetPayment } = useAssetPayment();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -162,11 +164,14 @@ export function TeamCreatePage() {
     if (!purchaseModal) return;
     setSaving(true);
     try {
-      const res = await fetch("/api/teams/logos/purchase", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ logoKey: purchaseModal }),
-      });
+      const res = await runWithAssetPayment((allowFootballCredit) =>
+        fetch("/api/teams/logos/purchase", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ logoKey: purchaseModal, allowFootballCredit }),
+        }),
+      );
+      if (!res) { setPurchaseModal(null); return; }
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "خطا");
       setUnlockedLogos((prev) => [...prev, purchaseModal]);
@@ -185,7 +190,14 @@ export function TeamCreatePage() {
   const payAndContinue = async () => {
     setSaving(true);
     try {
-      const res = await fetch("/api/teams/draft/pay-formation", { method: "POST" });
+      const res = await runWithAssetPayment((allowFootballCredit) =>
+        fetch("/api/teams/draft/pay-formation", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ allowFootballCredit }),
+        }),
+      );
+      if (!res) return;
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "خطا");
       setTeamId(json.teamId);

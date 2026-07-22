@@ -3,6 +3,8 @@
  * Enable with DEV_MEMORY_DB=true in .env (used automatically with SMS_MOCK_MODE).
  */
 import { createCompetitionSeedData } from "@/server/memory/competition-data";
+import { FootballCreditConfirmationRequiredError } from "@/server/services/asset-payment-errors";
+import { isFootballCreditAllowed } from "@/server/services/asset-payment-context";
 import { buildWeekKandakators, tehranDateKey } from "@/server/memory/kandakator-seed";
 import { REWARD_TABLES } from "@/shared/constants/reward-tables";
 import { OTP_RATE_LIMIT_WINDOW_MS } from "@/shared/constants/auth";
@@ -13,12 +15,13 @@ import { calculatePredictionAccuracy } from "@/shared/lib/prediction-accuracy";
 import { serializeKickoffAt } from "@/shared/lib/dates";
 import { userNeedsDisplayName } from "@/shared/lib/kandakator-utils";
 import { isLegacyInvitePlaceholderUser } from "@/shared/lib/legacy-invite-placeholder";
-import { getRewardFromTable } from "@/shared/constants/reward-tables";
+import { FOOTBALL_CREDIT_PERFECT_REWARD, getRewardFromTable } from "@/shared/constants/reward-tables";
 import type { PredictionResultItem } from "@/shared/types/prediction-results";
 import { isPredictionSettled } from "@/shared/types/prediction-results";
 import { tehranDayBounds } from "@/shared/lib/wheel-daily-coins";
 import { normalizePhone } from "@/shared/lib/phone";
 import { isInviteUnlimitedRewardPromoActive } from "@/shared/constants/invite";
+import { findStoreProduct } from "@/shared/constants/store";
 
 export interface MemoryOtpSession {
   codeHash: string;
@@ -53,6 +56,11 @@ export interface MemoryWallet {
   predictionRewardCoins: number;
   systemRewardCoins: number;
   purchasedCoins: number;
+  footballCredits: number;
+  legendsCupTickets: number;
+  normalCupTickets: number;
+  tournamentTickets: number;
+  teamCompetitionTickets: number;
   cashBalanceToman: number;
 }
 
@@ -279,6 +287,11 @@ export const devMemoryDb = {
             predictionRewardCoins: 0,
             systemRewardCoins: db().signupBonus,
             purchasedCoins: 0,
+            footballCredits: 0,
+              legendsCupTickets: 0,
+              normalCupTickets: 0,
+              tournamentTickets: 0,
+              teamCompetitionTickets: 0,
             cashBalanceToman: 0,
           });
         }
@@ -331,6 +344,11 @@ export const devMemoryDb = {
         predictionRewardCoins: 0,
         systemRewardCoins: db().signupBonus,
         purchasedCoins: 0,
+        footballCredits: 0,
+        legendsCupTickets: 0,
+        normalCupTickets: 0,
+        tournamentTickets: 0,
+        teamCompetitionTickets: 0,
         cashBalanceToman: 0,
       };
       const profile: MemoryProfile = {
@@ -380,6 +398,11 @@ export const devMemoryDb = {
         predictionRewardCoins: 0,
         systemRewardCoins: db().signupBonus,
         purchasedCoins: 0,
+        footballCredits: 0,
+        legendsCupTickets: 0,
+        normalCupTickets: 0,
+        tournamentTickets: 0,
+        teamCompetitionTickets: 0,
         cashBalanceToman: 0,
       };
       const profile: MemoryProfile = {
@@ -480,12 +503,54 @@ export const devMemoryDb = {
       db().wallets.set(userId, w);
       return w;
     },
-    addPredictionReward(userId: string, amount: number) {
+    /**
+     * Centralized asset spending mirror of processAssetPayment:
+     * purchased → system → prediction, then football credit (only when confirmed).
+     */
+    spendAssets(userId: string, amount: number, allowFootballCredit: boolean) {
       const w = db().wallets.get(userId);
       if (!w) throw new Error("کیف پول یافت نشد");
-      w.predictionRewardCoins += amount;
+      const cost = Math.floor(amount);
+      if (cost <= 0) return w;
+      const allowCredit = allowFootballCredit || isFootballCreditAllowed();
+
+      const coinBalance =
+        w.purchasedCoins + w.systemRewardCoins + w.predictionRewardCoins;
+
+      if (coinBalance >= cost) {
+        let remaining = cost;
+        const take = (field: keyof Pick<MemoryWallet, "purchasedCoins" | "systemRewardCoins" | "predictionRewardCoins">) => {
+          const n = Math.min(w[field], remaining);
+          w[field] -= n;
+          remaining -= n;
+        };
+        take("purchasedCoins");
+        take("systemRewardCoins");
+        take("predictionRewardCoins");
+        db().wallets.set(userId, w);
+        return w;
+      }
+
+      const footballCredits = w.footballCredits ?? 0;
+      if (coinBalance + footballCredits < cost) {
+        throw new Error("موجودی کافی نیست");
+      }
+
+      if (!allowCredit) {
+        throw new FootballCreditConfirmationRequiredError(cost, coinBalance, footballCredits);
+      }
+
+      const footballPortion = cost - coinBalance;
+      w.purchasedCoins = 0;
+      w.systemRewardCoins = 0;
+      w.predictionRewardCoins = 0;
+      w.footballCredits = footballCredits - footballPortion;
       db().wallets.set(userId, w);
       return w;
+    },
+    addPredictionReward(userId: string, amount: number) {
+      // Mirror production: prediction rewards land in systemRewardCoins (سکه جایزه).
+      return this.addSystemReward(userId, amount);
     },
     adjustSystemReward(userId: string, delta: number) {
       const w = db().wallets.get(userId);
@@ -502,6 +567,38 @@ export const devMemoryDb = {
       const w = db().wallets.get(userId);
       if (!w) throw new Error("کیف پول یافت نشد");
       w.systemRewardCoins += amount;
+      db().wallets.set(userId, w);
+      return w;
+    },
+    addTickets(
+      userId: string,
+      grants: Array<{ ticketType: keyof Pick<
+        MemoryWallet,
+        | "legendsCupTickets"
+        | "normalCupTickets"
+        | "tournamentTickets"
+        | "teamCompetitionTickets"
+      >; quantity: number }>,
+    ) {
+      const w = db().wallets.get(userId);
+      if (!w) throw new Error("کیف پول یافت نشد");
+      for (const grant of grants) {
+        const qty = Math.floor(grant.quantity);
+        if (qty <= 0) continue;
+        w[grant.ticketType] = (w[grant.ticketType] ?? 0) + qty;
+      }
+      db().wallets.set(userId, w);
+      return w;
+    },
+    adjustFootballCredits(userId: string, delta: number) {
+      const w = db().wallets.get(userId);
+      if (!w) throw new Error("کیف پول یافت نشد");
+      const current = w.footballCredits ?? 0;
+      if (delta >= 0) {
+        w.footballCredits = current + delta;
+      } else {
+        w.footballCredits = Math.max(0, current + delta);
+      }
       db().wallets.set(userId, w);
       return w;
     },
@@ -960,17 +1057,18 @@ export const devMemoryDb = {
       const reward = getRewardFromTable(input.rewardTableSlug, accuracy);
 
       p.accuracyPercent = accuracy;
-      p.coinsEarned = reward.coins;
+      p.coinsEarned = 0;
       p.xpEarned = reward.xp;
       p.scoredAt = new Date();
 
-      if (reward.coins > 0) {
-        devMemoryDb.wallet.addSystemReward(input.userId, reward.coins);
-      }
       if (reward.xp > 0) {
         devMemoryDb.profile.addXp(input.userId, reward.xp);
       }
       if (accuracy === 100) {
+        devMemoryDb.wallet.adjustFootballCredits(
+          input.userId,
+          FOOTBALL_CREDIT_PERFECT_REWARD,
+        );
         devMemoryDb.profile.incrementPerfectPredictions(input.userId);
       }
       if (reward.medalSlug) {
@@ -1172,14 +1270,14 @@ export const devMemoryDb = {
         prediction: prediction ?? null,
       };
     },
-    joinCup(cupId: string, userId: string) {
+    joinCup(cupId: string, userId: string, allowFootballCredit = false) {
       const cd = db().competitionData;
       const cup = cd.cups.find((c) => c.id === cupId);
       if (!cup) throw new Error("جام یافت نشد");
       if (cd.cupEntries.some((e) => e.cupId === cupId && e.userId === userId)) {
         throw new Error("شما قبلاً ثبت‌نام کرده‌اید");
       }
-      devMemoryDb.wallet.deductForPrediction(userId, cup.entryFeeCoins);
+      devMemoryDb.wallet.spendAssets(userId, cup.entryFeeCoins, allowFootballCredit);
       cd.cupEntries.push({ id: `ce-${Date.now()}`, cupId, userId, status: "REGISTERED" });
       devMemoryDb.profile.incrementCups(userId);
       return { cupId, userId };
@@ -1243,14 +1341,14 @@ export const devMemoryDb = {
         predictions,
       };
     },
-    registerTournament(tournamentId: string, userId: string) {
+    registerTournament(tournamentId: string, userId: string, allowFootballCredit = false) {
       const cd = db().competitionData;
       const t = cd.tournaments.find((x) => x.id === tournamentId);
       if (!t) throw new Error("تورنمنت یافت نشد");
       if (cd.tournamentEntries.some((e) => e.tournamentId === tournamentId && e.userId === userId)) {
         throw new Error("قبلاً ثبت‌نام کرده‌اید");
       }
-      devMemoryDb.wallet.deductForPrediction(userId, t.registrationFeeCoins);
+      devMemoryDb.wallet.spendAssets(userId, t.registrationFeeCoins, allowFootballCredit);
       cd.tournamentEntries.push({
         id: `te-${Date.now()}`,
         tournamentId,
@@ -1261,7 +1359,7 @@ export const devMemoryDb = {
       devMemoryDb.profile.incrementTournaments(userId);
       return { tournamentId, userId };
     },
-    predictTournament(tournamentId: string, userId: string, matchId: string, home: number, away: number) {
+    predictTournament(tournamentId: string, userId: string, matchId: string, home: number, away: number, allowFootballCredit = false) {
       const cd = db().competitionData;
       const t = cd.tournaments.find((x) => x.id === tournamentId);
       if (!t) throw new Error("تورنمنت یافت نشد");
@@ -1271,7 +1369,7 @@ export const devMemoryDb = {
       if (db().predictions.some((p) => p.userId === userId && p.competitionRefId === tournamentId && p.matchId === matchId)) {
         throw new Error("پیش‌بینی این مسابقه ثبت شده");
       }
-      devMemoryDb.wallet.deductForPrediction(userId, t.predictionFeeCoins);
+      devMemoryDb.wallet.spendAssets(userId, t.predictionFeeCoins, allowFootballCredit);
       return devMemoryDb.predictions.create({
         userId,
         matchId,
@@ -1508,6 +1606,7 @@ export const devMemoryDb = {
       return db().competitionData.wheelRewards.map((option) => ({
         coins: option.coins,
         weight: option.weight,
+        tickets: option.tickets ?? [],
       }));
     },
     spinCount(userId: string) {
@@ -1579,13 +1678,24 @@ export const devMemoryDb = {
     getPackages() {
       return db().competitionData.coinPackages;
     },
-    buyPackage(userId: string, packageId: string, method: "wallet" | "gateway" = "gateway") {
-      const pkg = db().competitionData.coinPackages.find((p) => p.id === packageId);
+    async buyPackage(userId: string, packageId: string, method: "wallet" | "gateway" = "gateway") {
+      const pkg = findStoreProduct(packageId);
       if (!pkg) throw new Error("بسته یافت نشد");
       if (method === "wallet") {
         devMemoryDb.wallet.deductCash(userId, pkg.priceToman);
       }
-      devMemoryDb.wallet.addPurchased(userId, pkg.coinAmount);
+      for (const grant of pkg.grants) {
+        if (grant.kind === "purchasedCoins") {
+          devMemoryDb.wallet.addPurchased(userId, grant.amount);
+        } else if (grant.kind === "ticket") {
+          devMemoryDb.wallet.addTickets(userId, [
+            { ticketType: grant.ticketType, quantity: grant.quantity },
+          ]);
+        } else if (grant.kind === "energy") {
+          const { grantPurchasedEnergy } = await import("@/server/services/energy-service");
+          await grantPurchasedEnergy(userId, grant.percent);
+        }
+      }
       db().competitionData.transactions.push({
         id: `tx-${Date.now()}`,
         userId,

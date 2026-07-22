@@ -11,6 +11,7 @@ import { prisma } from "@/shared/lib/prisma";
 import { shouldUseMemoryDb } from "@/server/db";
 import { createNotification, dismissTeamInviteNotifications } from "@/server/services/notification-service";
 import { deductCoins, deductCoinsWithType } from "@/server/services/wallet-service";
+import { assertFootballCreditConfirmationSatisfied } from "@/server/services/asset-payment-service";
 import {
   MEMBERSHIP_REQUEST_EXTRA_FEE,
   MEMBERSHIP_REQUEST_FREE_WEEKLY,
@@ -162,6 +163,11 @@ export async function payFormationFee(userId: string) {
   if (duplicate) throw new Error("نام تیم تکراری است");
 
   await ensureLogoUnlocked(userId, draft.logoKey);
+
+  await assertFootballCreditConfirmationSatisfied(userId, TEAM_FORMATION_FEE);
+
+  const { consumeEnergy } = await import("@/server/services/energy-service");
+  await consumeEnergy(userId, "TEAM_CREATION");
 
   const team = await prisma.$transaction(async (tx) => {
     await deductCoinsWithType(
@@ -422,13 +428,23 @@ export async function sendTeamInvite(userId: string, teamId: string, inviteeId: 
     const sentCount = await countTeamInvitesSent(teamId);
     if (sentCount >= config.freeInviteLimit) {
       coinCost = TEAM_EXTRA_INVITE_FEE;
-      await deductCoinsWithType(
-        userId,
-        coinCost,
-        CoinTransactionType.TEAM_EXTRA_INVITE_FEE,
-        `هزینه دعوت اضافی تیم ${team.name}`,
-      );
     }
+  }
+
+  if (coinCost > 0) {
+    await assertFootballCreditConfirmationSatisfied(userId, coinCost);
+  }
+
+  const { consumeEnergy } = await import("@/server/services/energy-service");
+  await consumeEnergy(userId, "TEAM_MEMBER_SELECTION");
+
+  if (coinCost > 0) {
+    await deductCoinsWithType(
+      userId,
+      coinCost,
+      CoinTransactionType.TEAM_EXTRA_INVITE_FEE,
+      `هزینه دعوت اضافی تیم ${team.name}`,
+    );
   }
 
   const ownerProfile = await prisma.userProfile.findUnique({ where: { userId } });
@@ -1180,6 +1196,16 @@ export async function createMembershipRequest(userId: string, teamId: string) {
   let feeCoins = 0;
   if (recentCount >= MEMBERSHIP_REQUEST_FREE_WEEKLY) {
     feeCoins = MEMBERSHIP_REQUEST_EXTRA_FEE;
+  }
+
+  if (feeCoins > 0) {
+    await assertFootballCreditConfirmationSatisfied(userId, feeCoins);
+  }
+
+  const { consumeEnergy } = await import("@/server/services/energy-service");
+  await consumeEnergy(userId, "TEAM_JOIN_REQUEST");
+
+  if (feeCoins > 0) {
     await deductCoins(userId, feeCoins, `هزینه درخواست عضویت در تیم ${team.name}`);
   }
 

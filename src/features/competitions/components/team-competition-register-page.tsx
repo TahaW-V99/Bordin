@@ -11,6 +11,7 @@ import { Button } from "@/shared/components/ui/button";
 import { Chip } from "@/shared/components/ui/chip";
 import { Modal } from "@/shared/components/ui/modal";
 import { useToast } from "@/shared/components/ui/toast";
+import { useAssetPayment } from "@/shared/hooks/use-asset-payment";
 import { Skeleton } from "@/shared/components/ui/skeleton";
 import { formatPersianNumber } from "@/shared/lib/dates";
 import { cn } from "@/shared/lib/cn";
@@ -91,6 +92,7 @@ function TeamAvatar({
 export function TeamCompetitionRegisterPage({ competitionId }: { competitionId: string }) {
   const router = useRouter();
   const { toast } = useToast();
+  const { runWithAssetPayment } = useAssetPayment();
   const [comp, setComp] = useState<Record<string, unknown> | null>(null);
   const [ownedTeams, setOwnedTeams] = useState<TeamRow[]>([]);
   const [memberTeams, setMemberTeams] = useState<TeamRow[]>([]);
@@ -174,13 +176,21 @@ export function TeamCompetitionRegisterPage({ competitionId }: { competitionId: 
     options?: { ownerCoversShortfall?: boolean; notifyMembers?: boolean },
   ) => {
     setSubmitting(true);
-    const res = await fetch(`/api/team-competitions/${competitionId}/register`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ teamId, ...options }),
-    });
-    const data = await res.json();
+    const res = await runWithAssetPayment((allowFootballCredit) =>
+      fetch(`/api/team-competitions/${competitionId}/register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ teamId, ...options, allowFootballCredit }),
+      }),
+    );
     setSubmitting(false);
+    if (!res) {
+      setConfirmTeamId(null);
+      setCoverModal(null);
+      setNotifyModal(null);
+      return;
+    }
+    const data = await res.json();
     setConfirmTeamId(null);
     setCoverModal(null);
     setNotifyModal(null);
@@ -228,9 +238,20 @@ export function TeamCompetitionRegisterPage({ competitionId }: { competitionId: 
 
   const submitMembershipRequest = async (team: TeamRow) => {
     setMembershipSubmitting(true);
-    const res = await fetch(`/api/teams/${team.id}/membership-requests`, { method: "POST" });
-    const data = await res.json();
+    const res = await runWithAssetPayment((allowFootballCredit) =>
+      fetch(`/api/teams/${team.id}/membership-requests`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ allowFootballCredit }),
+      }),
+    );
     setMembershipSubmitting(false);
+    if (!res) {
+      setMembershipModalTeam(null);
+      setPendingMembershipTeam(null);
+      return;
+    }
+    const data = await res.json();
 
     if (res.status === 409 && data.code === TEAM_MEMBERSHIP_CONFLICT_CODE) {
       setMembershipModalTeam(null);
@@ -259,9 +280,14 @@ export function TeamCompetitionRegisterPage({ competitionId }: { competitionId: 
     if (!membershipConflictTeam || !pendingMembershipTeam) return;
     setMembershipSubmitting(true);
     try {
-      const leaveRes = await fetch(`/api/teams/${membershipConflictTeam.id}/leave`, {
-        method: "POST",
-      });
+      const leaveRes = await runWithAssetPayment((allowFootballCredit) =>
+        fetch(`/api/teams/${membershipConflictTeam.id}/leave`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ allowFootballCredit }),
+        }),
+      );
+      if (!leaveRes) return;
       const leaveData = await leaveRes.json();
       if (!leaveRes.ok) throw new Error(leaveData.error ?? "خطا در ترک تیم");
 

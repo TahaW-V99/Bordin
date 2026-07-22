@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/shared/lib/auth";
 import { getApiErrorMessage } from "@/shared/lib/api-errors";
+import { readAllowFootballCredit } from "@/shared/lib/api-route";
+import { runWithAssetPaymentContext } from "@/server/services/asset-payment-context";
+import { footballCreditConfirmationResponse } from "@/server/services/asset-payment-response";
 import { predictTournament } from "@/server/services/competition-service";
 
 const schema = z.object({
@@ -18,16 +21,21 @@ export async function POST(
     const session = await getSession();
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const { id } = await params;
+    const allowFootballCredit = await readAllowFootballCredit(request);
     const body = schema.parse(await request.json());
-    const prediction = await predictTournament(
-      id,
-      session.userId,
-      body.matchId,
-      body.homePrediction,
-      body.awayPrediction,
+    const prediction = await runWithAssetPaymentContext(allowFootballCredit, () =>
+      predictTournament(
+        id,
+        session.userId,
+        body.matchId,
+        body.homePrediction,
+        body.awayPrediction,
+      ),
     );
     return NextResponse.json({ success: true, prediction });
   } catch (error) {
+    const confirm = footballCreditConfirmationResponse(error);
+    if (confirm) return confirm;
     return NextResponse.json({ error: getApiErrorMessage(error) }, { status: 400 });
   }
 }

@@ -1,8 +1,9 @@
 "use client";
 
-import { Award, Coins, Medal, MessageSquareShare, Target, Trophy, Users } from "lucide-react";
+import { Award, Medal, MessageSquareShare, Target, Trophy, Users } from "lucide-react";
 import { formatPersianNumber, formatTehranDate } from "@/shared/lib/dates";
 import { cn } from "@/shared/lib/cn";
+import { FOOTBALL_CREDIT_PERFECT_REWARD } from "@/shared/constants/reward-tables";
 import { isPredictionScored, isPredictionSettled, type PredictionResultItem } from "@/shared/types/prediction-results";
 
 function accuracyColor(percent: number | null) {
@@ -126,13 +127,11 @@ export function PredictionResultCard({
               </span>
             </div>
             <div className="flex flex-wrap items-center gap-3 text-xs">
-              <span
-                className="flex items-center gap-1 text-bordin-orange"
-                title="سکه جایزه سیستمی"
-              >
-                <Coins className="h-3.5 w-3.5" />
-                +{formatPersianNumber(item.coinsEarned ?? 0)} سکه
-              </span>
+              {item.accuracyPercent === 100 ? (
+                <span className="text-bordin-orange" title="اعتبار فوتبالی">
+                  {formatPersianNumber(FOOTBALL_CREDIT_PERFECT_REWARD)} اعتبار
+                </span>
+              ) : null}
               <span className="text-bordin-green" title="امتیاز دریافت شده">
                 +{formatPersianNumber(item.xpEarned ?? 0)} امتیاز
               </span>

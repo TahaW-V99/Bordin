@@ -9,6 +9,7 @@ import { Skeleton } from "@/shared/components/ui/skeleton";
 import { ProfileAvatar } from "@/shared/components/profile/profile-avatar";
 import { OtpInput } from "@/features/auth/components/otp-input";
 import { useToast } from "@/shared/components/ui/toast";
+import { useAssetPayment } from "@/shared/hooks/use-asset-payment";
 import {
   DISPLAY_NAME_CHANGE_COST,
 } from "@/shared/constants/settings";
@@ -47,17 +48,6 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
   return data as T;
 }
 
-async function patchJson<T>(url: string, body: unknown): Promise<T> {
-  const res = await fetch(url, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error ?? "خطا در ارتباط با سرور");
-  return data as T;
-}
-
 function validateNewPasswordFields(password: string, confirmPassword: string) {
   if (!password.trim()) return "رمز عبور جدید را وارد کنید";
   if (!confirmPassword.trim()) return "تکرار رمز عبور را وارد کنید";
@@ -83,6 +73,7 @@ function SettingsSection({
 
 export function SettingsPage() {
   const { toast } = useToast();
+  const { runWithAssetPayment } = useAssetPayment();
   const [loading, setLoading] = useState(true);
   const [settings, setSettings] = useState<SettingsData | null>(null);
   const [collectionOpen, setCollectionOpen] = useState(false);
@@ -190,12 +181,22 @@ export function SettingsPage() {
     }
     setNameSaving(true);
     try {
-      const result = await patchJson<{
+      const res = await runWithAssetPayment((allowFootballCredit) =>
+        fetch("/api/settings/display-name", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ displayName, allowFootballCredit }),
+        }),
+      );
+      if (!res) return;
+      const result = (await res.json()) as {
         displayName: string;
         coinsDeducted: number;
         nextNameChangeCost: number;
         displayNameChangeCount: number;
-      }>("/api/settings/display-name", { displayName });
+        error?: string;
+      };
+      if (!res.ok) throw new Error(result.error ?? "خطا در ارتباط با سرور");
 
       setSettings({
         ...settings,

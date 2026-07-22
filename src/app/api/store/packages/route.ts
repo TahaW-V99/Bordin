@@ -1,14 +1,14 @@
 import { withAuth, jsonOk } from "@/shared/lib/api-route";
 import { isStoreSellEnabled } from "@/shared/lib/environment";
 import {
-  getCoinPackages,
   getPurchaseHistory,
   getSellPackages,
+  getStoreCatalog,
   getStoreWallet,
 } from "@/server/services/store-service";
 
 export const GET = withAuth(async (userId) => {
-  const packages = await getCoinPackages();
+  const catalog = await getStoreCatalog();
   const sellPackages = isStoreSellEnabled() ? await getSellPackages() : [];
 
   let wallet = null;
@@ -26,5 +26,12 @@ export const GET = withAuth(async (userId) => {
     console.error("[store] purchase history load failed:", error);
   }
 
-  return jsonOk({ packages, sellPackages, wallet, purchaseHistory });
+  return jsonOk({
+    catalog,
+    // Backward-compatible alias for older clients
+    packages: catalog.coins,
+    sellPackages,
+    wallet,
+    purchaseHistory,
+  });
 });

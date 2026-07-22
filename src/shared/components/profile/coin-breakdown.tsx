@@ -12,21 +12,23 @@ export function CoinBreakdown({
   purchasedCoins: number;
   cashBalanceToman?: number;
 }) {
+  // Legacy predictionRewardCoins counts as reward coins in the product model.
+  const rewardCoins = systemRewardCoins + predictionRewardCoins;
   const items = [
     {
-      label: "سکه جایزه سیستمی",
-      value: systemRewardCoins,
+      label: "سکه جایزه",
+      value: rewardCoins,
       color: "text-bordin-blue",
       image: "/images/store/coin-system-reward.png",
     },
     {
-      label: "خریداری شده",
+      label: "سکه خریداری شده",
       value: purchasedCoins,
       color: "text-bordin-orange",
       image: "/images/store/coin-bordin.png",
     },
   ];
-  const total = predictionRewardCoins + systemRewardCoins + purchasedCoins;
+  const total = rewardCoins + purchasedCoins;
 
   return (
     <div className="space-y-3">

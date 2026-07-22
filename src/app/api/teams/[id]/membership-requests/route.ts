@@ -1,18 +1,22 @@
 import { NextResponse } from "next/server";
-import { z } from "zod";
 import { getSession } from "@/shared/lib/auth";
 import { getApiErrorMessage } from "@/shared/lib/api-errors";
+import { jsonCaughtError, readAllowFootballCredit } from "@/shared/lib/api-route";
+import { runWithAssetPaymentContext } from "@/server/services/asset-payment-context";
 import { createMembershipRequest } from "@/server/services/team-service";
 import { TeamMembershipConflictError } from "@/shared/constants/teams";
 
 type Params = { params: Promise<{ id: string }> };
 
-export async function POST(_request: Request, { params }: Params) {
+export async function POST(request: Request, { params }: Params) {
   try {
     const session = await getSession();
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const { id } = await params;
-    const result = await createMembershipRequest(session.userId, id);
+    const allowFootballCredit = await readAllowFootballCredit(request);
+    const result = await runWithAssetPaymentContext(allowFootballCredit, () =>
+      createMembershipRequest(session.userId, id),
+    );
     return NextResponse.json({
       request: result.request,
       teamName: result.teamName,
@@ -33,7 +37,7 @@ export async function POST(_request: Request, { params }: Params) {
         { status: 409 },
       );
     }
-    return NextResponse.json({ error: getApiErrorMessage(error) }, { status: 400 });
+    return jsonCaughtError(error);
   }
 }
 

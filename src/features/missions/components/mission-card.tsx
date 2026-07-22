@@ -155,7 +155,7 @@ export function MissionCard({
                     {tier.coins > 0 ? (
                       <span className="inline-flex items-center gap-1">
                         <Coins className="h-3.5 w-3.5 text-[#ffd54a]" />
-                        {formatPersianNumber(tier.coins)} سکه
+                        {formatPersianNumber(tier.coins)} اعتبار
                       </span>
                     ) : null}
                     {tier.xp > 0 ? (

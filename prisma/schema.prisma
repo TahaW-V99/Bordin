@@ -278,6 +278,8 @@ model User {
   watchPartyEntries  WatchPartyEntry[]
   watchPartyInvitesSent WatchPartyInvite[] @relation("WatchPartyInviter")
   watchPartyInvitesReceived WatchPartyInvite[] @relation("WatchPartyInvitee")
+  energy             UserEnergy?
+  energyLedgerEntries EnergyLedgerEntry[]
 
   @@index([phone])
   @@map("users")
@@ -319,6 +321,11 @@ model CoinWallet {
   predictionRewardCoins Int  @default(0)
   systemRewardCoins     Int  @default(0)
   purchasedCoins        Int  @default(0)
+  footballCredits       Int  @default(0)
+  legendsCupTickets     Int  @default(0)
+  normalCupTickets      Int  @default(0)
+  tournamentTickets     Int  @default(0)
+  teamCompetitionTickets Int @default(0)
   cashBalanceToman      Int  @default(0)
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
@@ -1112,6 +1119,69 @@ model AdminConfig {
   updatedAt DateTime       @updatedAt
 
   @@map("admin_configs")
+}
+
+/** Singleton energy configuration (id = "default"). */
+model EnergyConfig {
+  id                    String   @id @default("default")
+  costs                 Json
+  inviteRecoveryEnabled Boolean  @default(false)
+  updatedAt             DateTime @updatedAt
+
+  @@map("energy_configs")
+}
+
+model UserEnergy {
+  id                       String   @id @default(cuid())
+  userId                   String   @unique
+  energyPercent            Float    @default(100)
+  lastAutoRecoveryAt       DateTime @default(now())
+  autoRecoveredPercent     Float    @default(0)
+  inviteRecoveredPercent   Float    @default(0)
+  predictionCount          Int      @default(0)
+  teamCompetitionRegCount  Int      @default(0)
+  cupRegCount              Int      @default(0)
+  tournamentRegCount       Int      @default(0)
+  teamCreationCount        Int      @default(0)
+  privateChatCount         Int      @default(0)
+  teamJoinRequestCount     Int      @default(0)
+  teamMemberSelectionCount Int      @default(0)
+  luckyWheelSpinCount      Int      @default(0)
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_energies")
+}
+
+enum EnergyLedgerEventType {
+  ENERGY_CONSUMED
+  ENERGY_RECOVERED_BY_TIME
+  ENERGY_RECOVERED_BY_INVITE
+  ENERGY_PURCHASED
+  ENERGY_ADJUSTED_BY_ADMIN
+  ENERGY_BONUS
+}
+
+/** Append-only audit history of Energy changes. Never update or delete rows. */
+model EnergyLedgerEntry {
+  id           String                @id @default(cuid())
+  userId       String
+  eventType    EnergyLedgerEventType
+  energyBefore Float
+  energyChange Float
+  energyAfter  Float
+  activity     String?
+  referenceId  String?
+  metadata     Json?
+  createdAt    DateTime              @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([eventType, createdAt])
+  @@map("energy_ledger_entries")
 }
 
 model InviteLog {

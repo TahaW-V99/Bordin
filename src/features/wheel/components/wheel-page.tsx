@@ -8,54 +8,63 @@ import { formatPersianNumber } from "@/shared/lib/dates";
 import {
   FortuneWheel,
   computeWheelRotation,
+  type FortuneWheelSegment,
 } from "@/features/wheel/components/fortune-wheel";
-import { WheelSpinCostModal } from "@/features/wheel/components/wheel-spin-cost-modal";
-import { WHEEL_REWARD_OPTIONS } from "@/shared/constants/wheel";
+import { WheelTicketWinModal } from "@/features/wheel/components/wheel-ticket-win-modal";
+import { WHEEL_REWARD_OPTIONS, type WheelTicketReward } from "@/shared/constants/wheel";
+import { getTicketAssetByWalletField } from "@/shared/constants/tickets";
 
 type WheelStatus = {
   canSpin: boolean;
-  segmentLayout: number[];
-  isCostSpin: boolean;
-  calculatedCost: number;
-  canApplyCost: boolean;
-  totalCoins: number;
-  nextSpinNumber: number;
+  segments: FortuneWheelSegment[];
 };
 
 type SpinResult = {
   coinsWon: number;
+  ticketsWon?: WheelTicketReward[];
   segmentIndex: number;
-  spinCost: {
-    calculated: number;
-    applied: number;
-    skipped: boolean;
-    skipReason: string | null;
-    coinsLast3Days: number;
-    isCostSpin: boolean;
-  };
 };
+
+function buildFallbackSegments(): FortuneWheelSegment[] {
+  return WHEEL_REWARD_OPTIONS.map((option) => ({
+    coins: option.amount,
+    tickets: option.tickets ?? [],
+  }));
+}
 
 export function WheelPage() {
   const { toast } = useToast();
   const [status, setStatus] = useState<WheelStatus | null>(null);
   const [spinning, setSpinning] = useState(false);
-  const [result, setResult] = useState<number | null>(null);
+  const [result, setResult] = useState<{
+    coins: number;
+    tickets: WheelTicketReward[];
+  } | null>(null);
+  const [ticketModalOpen, setTicketModalOpen] = useState(false);
   const [wheelRotation, setWheelRotation] = useState(0);
   const [ballRotation, setBallRotation] = useState(0);
-  const [costModalOpen, setCostModalOpen] = useState(false);
   const rotationBase = useRef(0);
 
   const load = useCallback(async () => {
     const res = await fetch("/api/wheel");
     const data = await res.json();
+    const segments: FortuneWheelSegment[] =
+      Array.isArray(data.segments) && data.segments.length === WHEEL_REWARD_OPTIONS.length
+        ? data.segments
+        : Array.isArray(data.segmentLayout) &&
+            data.segmentLayout.length === WHEEL_REWARD_OPTIONS.length
+          ? data.segmentLayout.map((coins: number) => {
+              const option = WHEEL_REWARD_OPTIONS.find((item) => item.amount === coins);
+              return {
+                coins,
+                tickets: option?.tickets ?? [],
+              };
+            })
+          : buildFallbackSegments();
+
     setStatus({
-      canSpin: data.canSpin,
-      segmentLayout: data.segmentLayout ?? [],
-      isCostSpin: Boolean(data.isCostSpin),
-      calculatedCost: data.calculatedCost ?? 0,
-      canApplyCost: Boolean(data.canApplyCost),
-      totalCoins: data.totalCoins ?? 0,
-      nextSpinNumber: data.nextSpinNumber ?? 1,
+      canSpin: Boolean(data.canSpin),
+      segments,
     });
   }, []);
 
@@ -67,7 +76,7 @@ export function WheelPage() {
     if (!status?.canSpin || spinning) return;
     setSpinning(true);
     setResult(null);
-    setCostModalOpen(false);
+    setTicketModalOpen(false);
 
     const res = await fetch("/api/wheel", { method: "POST" });
     const data = (await res.json()) as SpinResult & { error?: string };
@@ -79,42 +88,37 @@ export function WheelPage() {
     }
 
     const targetRotation =
-      rotationBase.current + computeWheelRotation(data.segmentIndex, status?.segmentLayout.length ?? 0);
+      rotationBase.current +
+      computeWheelRotation(data.segmentIndex, status?.segments.length ?? 0);
     const targetBallRotation = ballRotation - targetRotation * 0.45;
 
     setWheelRotation(targetRotation);
     setBallRotation(targetBallRotation);
     rotationBase.current = targetRotation;
 
+    const ticketsWon = data.ticketsWon ?? [];
+
     window.setTimeout(() => {
       setSpinning(false);
-      setResult(data.coinsWon);
+      setResult({ coins: data.coinsWon, tickets: ticketsWon });
       setStatus((prev) => (prev ? { ...prev, canSpin: false } : prev));
 
-      let message = `تبریک! ${formatPersianNumber(data.coinsWon)} سکه برنده شدید`;
-      if (data.spinCost.isCostSpin && data.spinCost.applied > 0) {
-        message += ` (هزینه چرخش: ${formatPersianNumber(data.spinCost.applied)} سکه)`;
-      } else if (data.spinCost.isCostSpin && data.spinCost.skipped) {
-        message += " — هزینه چرخش اعمال نشد";
+      if (ticketsWon.length > 0) {
+        setTicketModalOpen(true);
+      } else {
+        toast(
+          `تبریک! ${formatPersianNumber(data.coinsWon)} سکه برنده شدید`,
+          "success",
+        );
       }
-      toast(message, "success");
       void load();
     }, 4300);
   };
 
-  const onSpinClick = () => {
-    if (!status?.canSpin || spinning) return;
-    if (status.isCostSpin && status.calculatedCost > 0) {
-      setCostModalOpen(true);
-      return;
-    }
-    void executeSpin();
-  };
-
   const segments =
-    status?.segmentLayout.length === WHEEL_REWARD_OPTIONS.length
-      ? status.segmentLayout
-      : WHEEL_REWARD_OPTIONS.map((option) => option.amount);
+    status?.segments.length === WHEEL_REWARD_OPTIONS.length
+      ? status.segments
+      : buildFallbackSegments();
 
   return (
     <>
@@ -129,9 +133,22 @@ export function WheelPage() {
         />
 
         {result !== null ? (
-          <p className="mt-6 text-xl font-bold text-bordin-green">
-            +{formatPersianNumber(result)} سکه
-          </p>
+          <div className="mt-6 space-y-1 text-center">
+            <p className="text-xl font-bold text-bordin-green">
+              +{formatPersianNumber(result.coins)} سکه
+            </p>
+            {result.tickets.map((ticket) => {
+              const asset = getTicketAssetByWalletField(ticket.ticketType);
+              return (
+                <p
+                  key={`${ticket.ticketType}-${ticket.quantity}`}
+                  className="text-sm font-medium text-bordin-orange"
+                >
+                  +×{formatPersianNumber(ticket.quantity)} {asset?.title ?? "بلیط"}
+                </p>
+              );
+            })}
+          </div>
         ) : null}
 
         <Button
@@ -140,19 +157,17 @@ export function WheelPage() {
           fullWidth
           disabled={!status?.canSpin || spinning}
           loading={spinning}
-          onClick={onSpinClick}
+          onClick={() => void executeSpin()}
         >
           {status?.canSpin ? "بچرخان!" : "فردا دوباره بیا"}
         </Button>
       </div>
 
-      <WheelSpinCostModal
-        open={costModalOpen}
-        calculatedCost={status?.calculatedCost ?? 0}
-        totalCoins={status?.totalCoins ?? 0}
-        canApply={status?.canApplyCost ?? false}
-        onConfirm={() => void executeSpin()}
-        onClose={() => setCostModalOpen(false)}
+      <WheelTicketWinModal
+        open={ticketModalOpen && (result?.tickets.length ?? 0) > 0}
+        coins={result?.coins ?? 0}
+        tickets={result?.tickets ?? []}
+        onClose={() => setTicketModalOpen(false)}
       />
     </>
   );

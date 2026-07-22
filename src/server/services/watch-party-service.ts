@@ -432,7 +432,11 @@ export async function getWatchPartyStatusForUser(userId: string, matchId: string
   };
 }
 
-export async function joinWatchParty(userId: string, roomId: string) {
+export async function joinWatchParty(
+  userId: string,
+  roomId: string,
+  allowFootballCredit = false,
+) {
   if (await shouldUseMemoryDb()) {
     throw new Error("watch party در حالت حافظه پشتیبانی نمی‌شود");
   }
@@ -467,6 +471,7 @@ export async function joinWatchParty(userId: string, roomId: string) {
       room.entryFeeCoins,
       CoinTransactionType.WATCH_PARTY_ENTRY,
       `ورود به تماشای گروهی ${label}`,
+      allowFootballCredit,
     );
   }
 

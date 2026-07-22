@@ -6,6 +6,7 @@ import { Badge } from "@/shared/components/ui/badge";
 import { Button } from "@/shared/components/ui/button";
 import { Modal } from "@/shared/components/ui/modal";
 import { useToast } from "@/shared/components/ui/toast";
+import { useAssetPayment } from "@/shared/hooks/use-asset-payment";
 import {
   formatTehranTime,
   formatCountdown,
@@ -18,6 +19,7 @@ import {
 import { cn } from "@/shared/lib/cn";
 import { isMatchFinishedForDisplay, isMatchResultKnown, hasKickoffPassed } from "@/shared/lib/match-result";
 import { calculatePredictionAccuracy } from "@/shared/lib/prediction-accuracy";
+import { FOOTBALL_CREDIT_PERFECT_REWARD } from "@/shared/constants/reward-tables";
 import { Clock, Minus, Plus, Users } from "lucide-react";
 import {
   WatchPartyButton,
@@ -141,6 +143,7 @@ export function MatchPredictionCard({
   highlightWatchParty?: boolean;
 }) {
   const { toast } = useToast();
+  const { runWithAssetPayment } = useAssetPayment();
   const [home, setHome] = useState(existingPrediction?.homePrediction ?? 0);
   const [away, setAway] = useState(existingPrediction?.awayPrediction ?? 0);
   const [localPrediction, setLocalPrediction] = useState<PredictionData | null>(null);
@@ -268,20 +271,27 @@ export function MatchPredictionCard({
         return;
       }
 
-      const res = await fetch("/api/predictions/daily", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          matchId,
-          kandakatorId,
-          homePrediction: home,
-          awayPrediction: away,
+      const res = await runWithAssetPayment((allowFootballCredit) =>
+        fetch("/api/predictions/daily", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            matchId,
+            kandakatorId,
+            homePrediction: home,
+            awayPrediction: away,
+            allowFootballCredit,
+          }),
         }),
-      });
+      );
+      if (!res) return;
       const data = await res.json();
       if (!res.ok) {
         if (data.code === "DISPLAY_NAME_REQUIRED") {
           onDisplayNameRequired?.();
+          return;
+        }
+        if (data.code === "ENERGY_INSUFFICIENT") {
           return;
         }
         throw new Error(data.error);
@@ -397,9 +407,9 @@ export function MatchPredictionCard({
                 <Badge variant="orange">
                   دقت {formatPersianNumber(displayedAccuracy)}٪
                 </Badge>
-                {activePrediction.coinsEarned ? (
+                {displayedAccuracy === 100 ? (
                   <Badge variant="green">
-                    +{formatPersianNumber(activePrediction.coinsEarned)} سکه
+                    +{formatPersianNumber(FOOTBALL_CREDIT_PERFECT_REWARD)} اعتبار
                   </Badge>
                 ) : null}
                 {activePrediction.xpEarned ? (
@@ -482,8 +492,11 @@ export function MatchPredictionCard({
           </div>
           {perfectReward ? (
             <span className="inline-flex w-fit animate-pulse items-center rounded-full border border-bordin-green/35 bg-bordin-green/12 px-2.5 py-1 text-[11px] font-semibold text-bordin-green shadow-[0_0_18px_rgba(34,197,94,0.14)]">
-              جایزه ۱۰۰٪ صحت: {formatPersianNumber(perfectReward.coins)} سکه +{" "}
-              {formatPersianNumber(perfectReward.xp)} امتیاز
+              {entryFeeCoins > 0 ||
+              (teamCompetitionBadges?.length ?? 0) > 0 ||
+              Boolean(knockoutUiState)
+                ? `جایزه ۱۰۰٪ صحت: ${formatPersianNumber(perfectReward.coins)} سکه + ${formatPersianNumber(perfectReward.xp)} امتیاز`
+                : `جایزه ۱۰۰٪ صحت: ${formatPersianNumber(FOOTBALL_CREDIT_PERFECT_REWARD)} اعتبار فوتبالی`}
             </span>
           ) : null}
           {watchPartyState ? (

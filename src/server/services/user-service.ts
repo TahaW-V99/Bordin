@@ -27,6 +27,11 @@ export async function getCurrentUser(userId: string) {
             predictionRewardCoins: wallet.predictionRewardCoins,
             systemRewardCoins: wallet.systemRewardCoins,
             purchasedCoins: wallet.purchasedCoins,
+            footballCredits: wallet.footballCredits ?? 0,
+            legendsCupTickets: wallet.legendsCupTickets ?? 0,
+            normalCupTickets: wallet.normalCupTickets ?? 0,
+            tournamentTickets: wallet.tournamentTickets ?? 0,
+            teamCompetitionTickets: wallet.teamCompetitionTickets ?? 0,
           }
         : null,
     };

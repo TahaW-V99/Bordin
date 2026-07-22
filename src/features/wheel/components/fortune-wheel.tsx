@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import { formatPersianNumber } from "@/shared/lib/dates";
+import type { TicketWalletField } from "@/shared/constants/tickets";
 
 const SIZE = 300;
 const CX = SIZE / 2;
@@ -28,14 +29,35 @@ function segmentLabelPosition(index: number, segmentAngle: number) {
   return polar(CX, CY, R * 0.68, angle);
 }
 
+/** Small gap above the coin number for the ticket label. */
+function segmentTicketLabelPosition(index: number, segmentAngle: number) {
+  const angle = index * segmentAngle + segmentAngle / 2;
+  return polar(CX, CY, R * 0.82, angle);
+}
+
+function totalTicketCount(tickets: FortuneWheelTicket[] | undefined) {
+  if (!tickets?.length) return 0;
+  return tickets.reduce((sum, ticket) => sum + ticket.quantity, 0);
+}
+
 export function computeWheelRotation(segmentIndex: number, segmentCount: number, extraSpins = 6) {
   const segmentAngle = 360 / Math.max(segmentCount, 1);
   const segmentCenter = segmentIndex * segmentAngle + segmentAngle / 2;
   return extraSpins * 360 + (360 - segmentCenter);
 }
 
+export type FortuneWheelTicket = {
+  ticketType: TicketWalletField;
+  quantity: number;
+};
+
+export type FortuneWheelSegment = {
+  coins: number;
+  tickets?: FortuneWheelTicket[];
+};
+
 type FortuneWheelProps = {
-  segments: number[];
+  segments: FortuneWheelSegment[];
   wheelRotation: number;
   ballRotation: number;
   spinning: boolean;
@@ -66,17 +88,34 @@ export function FortuneWheel({
         }}
       >
         <svg viewBox={`0 0 ${SIZE} ${SIZE}`} className="h-full w-full">
-          {segments.map((amount, index) => {
+          {segments.map((segment, index) => {
             const label = segmentLabelPosition(index, segmentAngle);
+            const ticketLabel = segmentTicketLabelPosition(index, segmentAngle);
             const textAngle = index * segmentAngle + segmentAngle / 2;
+            const ticketCount = totalTicketCount(segment.tickets);
+
             return (
-              <g key={`${amount}-${index}`}>
+              <g key={`${segment.coins}-${index}`}>
                 <path
                   d={segmentPath(index, segmentAngle)}
                   fill={index % 2 === 0 ? "#1c1408" : "#111111"}
                   stroke="#ffa100"
                   strokeWidth="1.2"
                 />
+                {ticketCount > 0 ? (
+                  <text
+                    x={ticketLabel.x}
+                    y={ticketLabel.y}
+                    fill="#ffa100"
+                    fontSize="7.5"
+                    fontWeight="600"
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                    transform={`rotate(${textAngle}, ${ticketLabel.x}, ${ticketLabel.y})`}
+                  >
+                    {`بلیط ${formatPersianNumber(ticketCount)}x`}
+                  </text>
+                ) : null}
                 <text
                   x={label.x}
                   y={label.y}
@@ -87,7 +126,7 @@ export function FortuneWheel({
                   dominantBaseline="middle"
                   transform={`rotate(${textAngle}, ${label.x}, ${label.y})`}
                 >
-                  {formatPersianNumber(amount)}
+                  {formatPersianNumber(segment.coins)}
                 </text>
               </g>
             );
