@@ -537,11 +537,12 @@ async function fetchMatchesForTehranDateFromLeagues(
 
   for (const leagueId of leagues) {
     try {
-      // Prefer VictoryAPI current season per league (calendar-year leagues like
-      // Brazil differ from European Aug–May seasons). Heuristic is fallback only.
+      // Default: heuristic season (Aug+ = calendar year, else previous year).
+      // Set FIXTURE_API_SEASON_LOOKUP=true to query /leagues?current=true per league
+      // when VictoryAPI is healthy (needed for calendar-year leagues like Brazil).
       const lookup =
-        process.env.FIXTURE_API_SEASON_LOOKUP?.trim().toLowerCase() !== "false" &&
-        process.env.FIXTURE_API_SEASON_LOOKUP?.trim() !== "0";
+        process.env.FIXTURE_API_SEASON_LOOKUP?.trim().toLowerCase() === "true" ||
+        process.env.FIXTURE_API_SEASON_LOOKUP?.trim() === "1";
       const season = lookup
         ? await resolveSeasonForLeague(leagueId, tehranDateKey)
         : resolveFixtureSeasonForDate(tehranDateKey);

@@ -60,6 +60,11 @@ export function recordFixtureApiSuccess() {
 export function recordFixtureApiFailure(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   if (message === "fixture_api_daily_budget_exhausted") return;
+  // Transient upstream blips should not freeze the whole queue for 15 minutes.
+  // Only hard connectivity failures trip the circuit.
+  if (!/fetch failed|ECONN|ENOTFOUND|timeout|AbortError|unreachable/i.test(message)) {
+    return;
+  }
 
   fixtureApiCircuit.consecutiveFailures += 1;
   if (fixtureApiCircuit.consecutiveFailures < API_CIRCUIT_FAILURE_THRESHOLD) return;
