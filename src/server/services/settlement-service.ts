@@ -6,7 +6,10 @@ import { devMemoryDb } from "@/server/dev-memory-db";
 import { shouldUseMemoryDb } from "@/server/db";
 import { ensureMemoryUser } from "@/server/ensure-memory-user";
 import { calculatePredictionAccuracy } from "@/shared/lib/prediction-accuracy";
-import { getRewardFromTable } from "@/shared/constants/reward-tables";
+import {
+  FOOTBALL_CREDIT_PERFECT_REWARD,
+  getRewardFromTable,
+} from "@/shared/constants/reward-tables";
 import {
   filterPredictionResultsByTab,
   type PredictionResultFilter,
@@ -21,6 +24,147 @@ import { createNotification } from "@/server/services/notification-service";
 import { isMatchResultKnown } from "@/shared/lib/match-result";
 import { logPredictionCategoryChange } from "@/server/services/match-lifecycle-logger";
 import { derivePredictionCategory } from "@/shared/lib/match-lifecycle";
+
+const PERFECT_FC_GRANT_CATEGORY = "prediction_fc_grant";
+
+/**
+ * Idempotent +100 football credit for a perfect (100%) scored prediction.
+ * Safe to call from first score, rescore, or historical backfill.
+ */
+async function grantPerfectPredictionFootballCredit(
+  userId: string,
+  predictionId: string,
+): Promise<boolean> {
+  if (await shouldUseMemoryDb()) return false;
+
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const existing = await tx.systemEventLog.findFirst({
+        where: { category: PERFECT_FC_GRANT_CATEGORY, entityId: predictionId },
+        select: { id: true },
+      });
+      if (existing) return false;
+
+      await tx.systemEventLog.create({
+        data: {
+          category: PERFECT_FC_GRANT_CATEGORY,
+          entityId: predictionId,
+          payload: {
+            userId,
+            amount: FOOTBALL_CREDIT_PERFECT_REWARD,
+            reason: "perfect_prediction",
+          },
+        },
+      });
+
+      await tx.coinWallet.upsert({
+        where: { userId },
+        create: {
+          userId,
+          footballCredits: FOOTBALL_CREDIT_PERFECT_REWARD,
+        },
+        update: {
+          footballCredits: { increment: FOOTBALL_CREDIT_PERFECT_REWARD },
+        },
+      });
+
+      return true;
+    });
+  } catch (error) {
+    console.error(
+      "[Bordin:settlement] perfect FC grant failed:",
+      predictionId,
+      error instanceof Error ? error.message : error,
+    );
+    return false;
+  }
+}
+
+async function clawbackPerfectPredictionFootballCredit(
+  userId: string,
+  predictionId: string,
+): Promise<boolean> {
+  if (await shouldUseMemoryDb()) return false;
+
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const existing = await tx.systemEventLog.findFirst({
+        where: { category: PERFECT_FC_GRANT_CATEGORY, entityId: predictionId },
+        select: { id: true },
+      });
+      if (!existing) return false;
+
+      await tx.systemEventLog.delete({ where: { id: existing.id } });
+
+      const wallet = await tx.coinWallet.findUnique({
+        where: { userId },
+        select: { footballCredits: true },
+      });
+      if (!wallet) return true;
+
+      await tx.coinWallet.update({
+        where: { userId },
+        data: {
+          footballCredits: Math.max(
+            0,
+            wallet.footballCredits - FOOTBALL_CREDIT_PERFECT_REWARD,
+          ),
+        },
+      });
+      return true;
+    });
+  } catch (error) {
+    console.error(
+      "[Bordin:settlement] perfect FC clawback failed:",
+      predictionId,
+      error instanceof Error ? error.message : error,
+    );
+    return false;
+  }
+}
+
+/** Heal historical 100% predictions that never received football credit. */
+export async function backfillPerfectPredictionFootballCredits(limit = 100) {
+  if (await shouldUseMemoryDb()) return 0;
+
+  const perfects = await prisma.prediction.findMany({
+    where: {
+      accuracyPercent: 100,
+      scoredAt: { not: null },
+    },
+    select: { id: true, userId: true },
+    orderBy: { scoredAt: "asc" },
+    take: Math.max(limit * 3, limit),
+  });
+  if (perfects.length === 0) return 0;
+
+  const alreadyGranted = await prisma.systemEventLog.findMany({
+    where: {
+      category: PERFECT_FC_GRANT_CATEGORY,
+      entityId: { in: perfects.map((row) => row.id) },
+    },
+    select: { entityId: true },
+  });
+  const grantedIds = new Set(
+    alreadyGranted.map((row) => row.entityId).filter((id): id is string => Boolean(id)),
+  );
+
+  let granted = 0;
+  for (const prediction of perfects) {
+    if (grantedIds.has(prediction.id)) continue;
+    if (await grantPerfectPredictionFootballCredit(prediction.userId, prediction.id)) {
+      granted += 1;
+      if (granted >= limit) break;
+    }
+  }
+
+  if (granted > 0) {
+    console.info(
+      `[Bordin:settlement] backfilled football credits for ${granted} perfect prediction(s)`,
+    );
+  }
+  return granted;
+}
 
 async function ensureMatchFinishedForSettlement(matchId: string) {
   if (await shouldUseMemoryDb()) {
@@ -368,6 +512,9 @@ async function scoreOrRescorePredictionRecord(input: {
         "@/server/services/chat-system-events"
       );
       void publishPerfectPredictionSystemMessage(input.userId);
+      await grantPerfectPredictionFootballCredit(input.userId, input.predictionId);
+    } else if (input.previousAccuracy === 100 && accuracy !== 100) {
+      await clawbackPerfectPredictionFootballCredit(input.userId, input.predictionId);
     }
 
     return true;
@@ -397,6 +544,7 @@ async function scoreOrRescorePredictionRecord(input: {
       "@/server/services/chat-system-events"
     );
     void publishPerfectPredictionSystemMessage(input.userId);
+    await grantPerfectPredictionFootballCredit(input.userId, input.predictionId);
   }
 
   if (reward.coins > 0) {
@@ -672,5 +820,9 @@ export async function settleAllFinishedMatches() {
     const result = await settleMatchPredictions(match.id);
     settled += result.settled;
   }
-  return { settled };
+
+  // Heal perfect predictions scored before FC grant existed in production settlement.
+  const footballCreditsBackfilled = await backfillPerfectPredictionFootballCredits(100);
+
+  return { settled, footballCreditsBackfilled };
 }
