@@ -52,33 +52,20 @@ export function isFixtureApiCircuitOpen() {
   return Date.now() < fixtureApiCircuit.openUntil;
 }
 
-/** Clear circuit state after a successful VictoryAPI interaction. */
-export function recordFixtureApiSuccess() {
+function recordFixtureApiSuccess() {
   fixtureApiCircuit.consecutiveFailures = 0;
   fixtureApiCircuit.openUntil = 0;
 }
 
-/**
- * Trip the existing fixture API circuit after consecutive failures.
- * While open, queue/by-id callers should skip outbound VictoryAPI work.
- */
-export function recordFixtureApiFailure(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error);
-  // Local budget exhaustion is not an upstream outage — do not open the circuit.
-  if (message === "fixture_api_daily_budget_exhausted") return;
-
+function recordFixtureApiFailure(error: unknown) {
   fixtureApiCircuit.consecutiveFailures += 1;
   if (fixtureApiCircuit.consecutiveFailures < API_CIRCUIT_FAILURE_THRESHOLD) return;
 
   fixtureApiCircuit.openUntil = Date.now() + API_CIRCUIT_COOLDOWN_MS;
+  const reason = error instanceof Error ? error.message : String(error);
   console.warn(
-    `[Bordin] Fixture API unreachable (${message}) — runtime kandakator sync paused for ${Math.round(API_CIRCUIT_COOLDOWN_MS / 60_000)} minutes. Push from your PC: npm run push:kandakator:staging`,
+    `[Bordin] Fixture API unreachable (${reason}) — runtime kandakator sync paused for ${Math.round(API_CIRCUIT_COOLDOWN_MS / 60_000)} minutes. Push from your PC: npm run push:kandakator:staging`,
   );
-}
-
-export function getFixtureApiCircuitOpenRemainingMs() {
-  if (!isFixtureApiCircuitOpen()) return 0;
-  return Math.max(0, fixtureApiCircuit.openUntil - Date.now());
 }
 
 export function isRuntimeKandakatorSyncEnabled() {
@@ -303,22 +290,15 @@ export async function syncDailyKandakatorFromFootballMatches(
   }
 
   const existingCountBeforeSync = await countKandakatorLinksForDate(dateKey);
-  // Partial fetches must still merge score/status for returned fixtures.
-  // Skipping the write entirely left finished matches stuck without results.
-  // Safe mode already refuses prune; we only avoid wiping on empty payloads.
   if (
     !canDeleteKandakatorData(options) &&
     isSuspiciousPartialFetch(sorted.length, existingCountBeforeSync)
   ) {
-    logKandakatorSyncPreserved({
+    return preserveExistingKandakatorDay(
       dateKey,
-      reason: "partial_api_response",
-      existingCount: existingCountBeforeSync,
-      fetchedCount: sorted.length,
+      "partial_api_response",
       source,
-    });
-    console.warn(
-      `[Bordin:sync] partial fetch for ${dateKey} — merging ${sorted.length}/${existingCountBeforeSync} without prune`,
+      sorted.length,
     );
   }
 

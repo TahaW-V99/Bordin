@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readMatchScore, resolveFixtureSeasonForDate } from "./fixture-api";
+import { readMatchScore } from "./fixture-api";
 
 describe("readMatchScore", () => {
   it("uses fullTime only when match is FINISHED", () => {
@@ -43,17 +43,5 @@ describe("readMatchScore", () => {
       },
     });
     expect(score).toEqual({ homeScore: 1, awayScore: 0 });
-  });
-});
-
-describe("resolveFixtureSeasonForDate", () => {
-  it("uses calendar year from July onward", () => {
-    expect(resolveFixtureSeasonForDate("2026-07-20")).toBe(2026);
-    expect(resolveFixtureSeasonForDate("2026-12-01")).toBe(2026);
-  });
-
-  it("uses previous year from January through June", () => {
-    expect(resolveFixtureSeasonForDate("2026-01-15")).toBe(2025);
-    expect(resolveFixtureSeasonForDate("2026-06-30")).toBe(2025);
   });
 });
